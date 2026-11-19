@@ -2,10 +2,20 @@
 
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 import pandas as pd
 
 from core.modelo import DADOS
+
+TIMEOUT_MS = 60_000                  # sem resposta nesse tempo, a tentativa é abandonada
+PRAZO_PARA_NOVA_TENTATIVA = 45       # segundos: depois disso, não vale fazer a pessoa esperar mais
+TRANSITORIOS = {429, 500, 503, 504}  # sobrecarga ou limite: vale tentar de novo
+ESPERAS = [2, 5]                     # segundos entre as tentativas
+
+
+class GeminiIndisponivel(Exception):
+    """O Gemini não respondeu (sobrecarga ou tempo esgotado) depois de todas as tentativas."""
 
 
 @dataclass
@@ -21,39 +31,60 @@ def _cliente(chave: str):
     # O chamador precisa guardar o cliente numa variável: se ele for descartado,
     # a biblioteca fecha a conexão antes da requisição sair.
     from google import genai
-    return genai.Client(api_key=chave)
+    from google.genai import types
+    return genai.Client(api_key=chave, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
 
 
-TRANSITORIOS = {429, 500, 503, 504}  # sobrecarga ou limite: vale tentar de novo
-ESPERAS = [2, 5]  # segundos entre as tentativas
+def _transitorio(e: Exception) -> bool:
+    from google.genai import errors
+    if isinstance(e, errors.APIError):
+        return e.code in TRANSITORIOS
+    # Tempo esgotado ou queda de rede. Compara pelo nome da classe porque o SDK pode usar httpx ou httpx2.
+    return isinstance(e, TimeoutError) or any(
+        c.__name__ in ("TimeoutException", "NetworkError") for c in type(e).__mro__)
 
 
 def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
-              reserva: str | None = None) -> RespostaIA:
-    """mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
+              reserva: str | None = None, ao_receber: Callable[[str], None] | None = None) -> RespostaIA:
+    """Gera a resposta em streaming: ao_receber é chamado com o texto acumulado a cada pedaço.
 
-    Em erro transitório, tenta de novo no mesmo modelo e, se houver, por último no modelo reserva.
+    mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
+    Em erro transitório antes do primeiro pedaço, tenta de novo no mesmo modelo e, se houver,
+    por último no modelo reserva.
     """
-    from google.genai import errors, types
+    from google.genai import types
     contents = [types.Content(role=m["papel"], parts=[types.Part(text=m["texto"])]) for m in mensagens]
     config = types.GenerateContentConfig(system_instruction=instrucao)
     cliente = _cliente(chave)
     tentativas = [modelo] * (len(ESPERAS) + 1) + ([reserva] if reserva else [])
+    comeco = time.perf_counter()
+
     for i, nome in enumerate(tentativas):
+        texto, uso = "", None
+        inicio = time.perf_counter()
         try:
-            inicio = time.perf_counter()
-            r = cliente.models.generate_content(model=nome, contents=contents, config=config)
+            for pedaco in cliente.models.generate_content_stream(model=nome, contents=contents, config=config):
+                if pedaco.text:
+                    texto += pedaco.text
+                    if ao_receber:
+                        ao_receber(texto)
+                if pedaco.usage_metadata:
+                    uso = pedaco.usage_metadata
             break
-        except errors.APIError as e:
-            if e.code not in TRANSITORIOS or i == len(tentativas) - 1:
+        except Exception as e:
+            ultima = i == len(tentativas) - 1
+            sem_tempo = time.perf_counter() - comeco > PRAZO_PARA_NOVA_TENTATIVA
+            if not _transitorio(e):
                 raise
+            if texto or ultima or sem_tempo:  # caiu no meio da resposta: não reenvia para não cobrar duas vezes
+                raise GeminiIndisponivel(str(e)) from e
             time.sleep(ESPERAS[i] if i < len(ESPERAS) else 0)
-    uso = r.usage_metadata
+
     return RespostaIA(
-        texto=r.text or "",
-        prompt_tokens=uso.prompt_token_count or 0,
-        resposta_tokens=uso.candidates_token_count or 0,
-        raciocinio_tokens=uso.thoughts_token_count or 0,
+        texto=texto,
+        prompt_tokens=(uso and uso.prompt_token_count) or 0,
+        resposta_tokens=(uso and uso.candidates_token_count) or 0,
+        raciocinio_tokens=(uso and uso.thoughts_token_count) or 0,
         segundos=time.perf_counter() - inicio,
     )
 

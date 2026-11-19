@@ -201,11 +201,13 @@ with aba_chat:
 
     caixa = st.container()
     with caixa:
+        boas_vindas = st.empty()
         if not st.session_state.conversa:
-            st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
-                    'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
-            st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
-                     label_visibility="collapsed", disabled=not online)
+            with boas_vindas.container():
+                st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
+                        'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
+                st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
+                         label_visibility="collapsed", disabled=not online)
         for m in st.session_state.conversa:
             with st.chat_message("user" if m["papel"] == "user" else "assistant",
                                  avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
@@ -222,6 +224,7 @@ with aba_chat:
                f"US$ {br(PRECO_IN, 2)} (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens")
 
     if pergunta and not bloqueado:
+        boas_vindas.empty()
         conversa = st.session_state.conversa
         prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
         conversa.append({"papel": "user", "texto": pergunta})
@@ -231,23 +234,27 @@ with aba_chat:
             with st.chat_message("assistant", avatar=":material/auto_awesome:"):
                 st.html(f'<div class="recibo"><span class="chip">previsão: <b>~{br(prev.mediana * fator)}</b> tokens '
                         f'({br(prev.p10 * fator)}–{br(prev.p90 * fator)})</span></div>')
+                saida = st.empty()
+                saida.markdown("_Pensando…_")
                 try:
-                    with st.spinner("Gerando resposta…"):
-                        with reg["trava"]:
-                            if reg["dia"] != date.today():
-                                reg["dia"], reg["chamadas_dia"] = date.today(), 0
-                            reg["chamadas_dia"] += 1
-                        r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO, reserva=MODELO_RESERVA)
-                except Exception as e:
+                    with reg["trava"]:
+                        if reg["dia"] != date.today():
+                            reg["dia"], reg["chamadas_dia"] = date.today(), 0
+                        reg["chamadas_dia"] += 1
+                    r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO, reserva=MODELO_RESERVA,
+                                     ao_receber=lambda t: saida.markdown(t + " ▌"))
+                except ia.GeminiIndisponivel as e:
                     conversa.pop()
-                    codigo = getattr(e, "code", None)
-                    if codigo in (500, 503, 504):
-                        st.warning("O Gemini está sobrecarregado agora (instabilidade do Google). "
-                                   "Tentamos algumas vezes sem sucesso. Envie de novo em alguns segundos.")
-                    elif codigo == 429:
+                    saida.empty()
+                    if "429" in str(e):
                         st.warning("O limite de uso do Gemini foi atingido. Tente de novo em um minuto.")
                     else:
-                        st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
+                        st.warning("O Gemini não respondeu a tempo (instabilidade do Google). "
+                                   "Tentamos algumas vezes sem sucesso. Envie de novo em alguns segundos.")
+                except Exception as e:
+                    conversa.pop()
+                    saida.empty()
+                    st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
                 else:
                     st.session_state.enviadas += 1
                     resp = {
