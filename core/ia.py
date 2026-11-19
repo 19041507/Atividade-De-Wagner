@@ -24,12 +24,14 @@ def _cliente(chave: str):
     return genai.Client(api_key=chave)
 
 
-def gerar(prompt: str, chave: str, modelo: str, max_saida: int | None = None) -> RespostaIA:
+def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str) -> RespostaIA:
+    """mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual."""
     from google.genai import types
-    config = types.GenerateContentConfig(max_output_tokens=max_saida) if max_saida else None
+    contents = [types.Content(role=m["papel"], parts=[types.Part(text=m["texto"])]) for m in mensagens]
+    config = types.GenerateContentConfig(system_instruction=instrucao)
     inicio = time.perf_counter()
     cliente = _cliente(chave)
-    r = cliente.models.generate_content(model=modelo, contents=prompt, config=config)
+    r = cliente.models.generate_content(model=modelo, contents=contents, config=config)
     uso = r.usage_metadata
     return RespostaIA(
         texto=r.text or "",
