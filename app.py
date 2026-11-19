@@ -12,7 +12,8 @@ from core.modelo import NOMES_IDIOMAS, ModeloTokens
 
 st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
 
-ROXO, VERDE, CINZA, ROSA = "#6D28D9", "#10B981", "#94A3B8", "#F43F5E"
+TINTA, MUDO, LINHA, PAPEL = "#161616", "#6B6A65", "#E3E1DA", "#F7F6F2"
+DESTAQUE, BOM, RUIM, CINZA = "#C2410C", "#3F6B4E", "#A33A2B", "#B8B5AC"
 INSTRUCAO = ("Você é um assistente prestativo e direto. Responda em português do Brasil, "
              "com clareza, usando listas ou exemplos quando ajudarem.")
 SUGESTOES = [
@@ -44,90 +45,133 @@ LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))
 LIMITE_DIA = int(config("LIMITE_DIA", 300))
 
 st.html("""
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-html, body, [class*="css"], .stMarkdown, button, input, textarea { font-family: 'Inter', sans-serif !important; }
-.block-container, div[data-testid="stMainBlockContainer"] { padding: 3.4rem 2.6rem 2rem; max-width: 100%; }
+:root { --tinta:#161616; --mudo:#6B6A65; --linha:#E3E1DA; --papel:#F7F6F2; --destaque:#C2410C; --bom:#3F6B4E; --ruim:#A33A2B;
+  --serif:'Instrument Serif', Georgia, serif; --sans:'IBM Plex Sans', system-ui, sans-serif; --mono:'IBM Plex Mono', ui-monospace, monospace; }
+html, body, .stApp, .stMarkdown, button, input, textarea, [class*="css"] { font-family: var(--sans) !important; }
+.stApp { background: var(--papel);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E"); }
+::selection { background: #F3D9C9; }
+.block-container, div[data-testid="stMainBlockContainer"] { padding: 3rem 3rem 2.5rem; max-width: 100%; }
 header[data-testid="stHeader"] { background: transparent; }
 section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] { display: none; }
-@keyframes sobe { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-@keyframes brilho { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-@keyframes pulso { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-.topo { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-  margin-bottom: 1.4rem; animation: sobe .5s ease both; }
-.marca { font-weight:800; font-size:1.15rem; letter-spacing:-.01em; color:#0F172A; }
-.marca span { color:#6D28D9; }
-.status { font-size:.8rem; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4; padding:.35rem .75rem; border-radius:999px; }
-.status i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.45rem; vertical-align:middle; animation: pulso 2s infinite; }
-.cabeca { display:grid; grid-template-columns: minmax(0,1.35fr) minmax(0,1fr); gap: 28px; align-items:end; margin-bottom: 1.4rem; }
-@media (max-width: 900px) { .cabeca { grid-template-columns: 1fr; } }
-.hero { animation: sobe .7s ease both; }
-.mini { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; animation: sobe .8s ease both; }
-.mini div { background:#FBFAFF; border:1px solid #EEEAFB; border-radius:14px; padding:12px 14px; }
-.mini span { display:block; font-size:.7rem; color:#64748B; text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
-.mini b { display:block; font-size:1.25rem; color:#0F172A; margin-top:.15rem; letter-spacing:-.01em; }
-.lado { background:#FBFAFF; border:1px solid #EEEAFB; border-radius:18px; padding:18px; animation: sobe .6s ease both; }
-.lado h4 { margin:0 0 .8rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:#6D28D9; }
-.linha { display:flex; justify-content:space-between; align-items:baseline; padding:.55rem 0; border-bottom:1px solid #EEEAFB; font-size:.88rem; color:#475569; }
-.linha:last-of-type { border-bottom:none; } .linha b { color:#0F172A; font-size:1rem; }
-.legenda { margin-top:1rem; font-size:.8rem; color:#64748B; line-height:1.9; }
-div[data-testid="stSegmentedControl"] { margin-bottom: .6rem; }
-.hero h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 800; line-height:1.1; margin:0 0 .6rem; letter-spacing:-.03em;
-  padding-bottom:.1em;
-  background: linear-gradient(90deg,#1E1B4B,#6D28D9,#10B981,#6D28D9); background-size:300% 100%;
-  -webkit-background-clip:text; background-clip:text; color:transparent; animation: brilho 12s ease infinite; }
-.hero p { color:#64748B; font-size:.98rem; line-height:1.55; max-width: 640px; margin:0; }
-.cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: .4rem 0 1.2rem; }
-.card { background:#fff; border:1px solid #EEF0F4; border-radius:16px; padding:18px 20px;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .25s ease, box-shadow .25s ease, border-color .25s;
-  animation: sobe .6s ease both; }
-.card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -12px rgba(109,40,217,.25); border-color:#E4D9FF; }
-.card .rot { font-size:.76rem; color:#64748B; font-weight:500; text-transform:uppercase; letter-spacing:.05em; }
-.card .val { font-size:1.7rem; font-weight:700; color:#0F172A; margin-top:.25rem; letter-spacing:-.01em; }
-.card .dica { font-size:.82rem; color:#94A3B8; margin-top:.2rem; }
-.card.destaque { background: linear-gradient(135deg,#6D28D9,#4C1D95); border:none; }
-.card.destaque .rot, .card.destaque .dica { color:#DDD6FE; } .card.destaque .val { color:#fff; }
-.nota { background:#F8FAFC; border-left:3px solid #6D28D9; padding:.8rem 1rem; border-radius:8px; color:#334155;
-  font-size:.92rem; animation: sobe .6s ease both; }
-.recibo { display:flex; flex-wrap:wrap; gap:6px; margin-top:.6rem; animation: sobe .5s ease both; }
-.chip { font-size:.74rem; font-weight:500; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4;
-  padding:.2rem .6rem; border-radius:999px; }
-.chip b { color:#0F172A; } .chip.ok { background:#ECFDF5; border-color:#D1FAE5; color:#047857; }
-.chip.fora { background:#FFF1F2; border-color:#FFE4E6; color:#BE123C; }
-.vazio { color:#64748B; padding:.6rem 0 1rem; animation: sobe .6s ease both; }
-.vazio .icone { width:44px; height:44px; margin:0 0 .8rem; border-radius:14px; display:flex; align-items:center;
-  justify-content:center; font-size:1.3rem; color:#fff; background:linear-gradient(135deg,#7C3AED,#10B981);
-  box-shadow:0 10px 24px -10px rgba(109,40,217,.6); }
-.vazio b { color:#0F172A; display:block; font-size:1.1rem; margin-bottom:.25rem; }
-div[data-testid="stChatMessage"] { animation: sobe .4s ease both; border-radius:16px; padding:14px 16px; margin-bottom:.6rem;
-  background:#FFFFFF; border:1px solid #EEF0F4; }
-div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background:#F8FAFC; border-color:#F1F5F9; }
-div[data-testid="stChatInput"] { border-radius:16px; box-shadow:0 8px 30px -12px rgba(15,23,42,.18); }
-div[data-testid="stPills"] button { border-radius:999px; transition: transform .2s, border-color .2s; }
-div[data-testid="stPills"] button:hover { transform: translateY(-1px); border-color:#C4B5FD; color:#6D28D9; }
-textarea { border-radius:12px !important; }
-footer { visibility:hidden; }
+footer { visibility: hidden; }
+@keyframes surge { from { opacity: 0; } to { opacity: 1; } }
+
+/* cabeçalho em estilo de publicação */
+.topo { display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap;
+  padding-bottom:.7rem; border-bottom:1px solid var(--tinta); box-shadow: 0 3px 0 -2px var(--linha); animation: surge .6s ease both; }
+.marca { font-family: var(--serif); font-size: 1.7rem; color: var(--tinta); letter-spacing:-.01em; }
+.marca small { font-family: var(--sans); font-size:.78rem; color: var(--mudo); margin-left:.8rem; letter-spacing:.02em; }
+.status { font-family: var(--mono); font-size:.76rem; color: var(--mudo); }
+.status i { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:.4rem; vertical-align:1px; }
+.abre { display:grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); gap: 48px; align-items:end; margin: 2.2rem 0 1.8rem; animation: surge .8s ease both; }
+@media (max-width: 960px) { .abre { grid-template-columns: 1fr; gap: 24px; } }
+.abre h1 { font-family: var(--serif) !important; font-weight: 400; font-size: clamp(2.6rem, 5.2vw, 4.2rem); line-height: .98;
+  letter-spacing: -.02em; color: var(--tinta); margin: 0 0 1rem; padding: 0; }
+.abre h1 em { color: var(--destaque); }
+.abre p { color: var(--mudo); font-size: 1.02rem; line-height: 1.6; max-width: 600px; margin: 0; }
+.numeros { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); border-top:1px solid var(--linha); }
+.numeros div { padding: .9rem 0 0 1rem; border-left:1px solid var(--linha); }
+.numeros div:first-child { border-left:none; padding-left:0; }
+.rotulo { display:block; font-size:.68rem; letter-spacing:.09em; text-transform:uppercase; color: var(--mudo); font-weight:500; }
+.numeros b { display:block; font-family: var(--mono); font-weight:500; font-size:1.35rem; color: var(--tinta);
+  margin-top:.3rem; font-variant-numeric: tabular-nums; }
+
+/* navegação como sumário: texto e sublinhado */
+div[data-testid="stButtonGroup"]:has(button[kind^="segmented_control"]) { border-bottom:1px solid var(--linha); margin-bottom: 1.6rem; }
+button[kind="segmented_control"], button[kind="segmented_controlActive"] { background: transparent !important; border: none !important;
+  border-radius: 0 !important; box-shadow: none !important; padding: .55rem 0 !important; margin-right: 1.8rem;
+  color: var(--mudo) !important; position: relative; }
+button[kind="segmented_control"]::after, button[kind="segmented_controlActive"]::after { content:""; position:absolute; left:0; right:0;
+  bottom:-1px; height:2px; background: var(--tinta); transform: scaleX(0); transform-origin: left; transition: transform .25s ease; }
+button[kind="segmented_control"]:hover { color: var(--tinta) !important; }
+button[kind="segmented_control"]:hover::after { transform: scaleX(.35); }
+button[kind="segmented_controlActive"] { color: var(--tinta) !important; }
+button[kind="segmented_controlActive"]::after { transform: scaleX(1); }
+button[kind="segmented_control"] p, button[kind="segmented_controlActive"] p { font-size: .95rem; font-weight: 500; }
+
+/* chat */
+div[data-testid="stChatMessageAvatarUser"], div[data-testid="stChatMessageAvatarAssistant"] { display:none; }
+div[data-testid="stChatMessage"] { background: transparent; padding: .2rem 0 1.2rem; gap: 0; animation: surge .35s ease both; }
+div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { padding-bottom: .6rem; }
+div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) div[data-testid="stChatMessageContent"] {
+  background:#EDEBE4; border-radius: 4px 14px 14px 14px; padding: .65rem .95rem; width: fit-content; max-width: 85%; }
+div[data-testid="stChatMessageContent"] p, div[data-testid="stChatMessageContent"] li { font-size: 1rem; line-height: 1.65; color: var(--tinta); }
+.quem { font-size:.68rem; letter-spacing:.09em; text-transform:uppercase; color: var(--mudo); font-weight:500; margin-bottom:.35rem; }
+.conta { font-family: var(--mono); font-size:.76rem; color: var(--mudo); margin-top:.7rem; padding-top:.55rem;
+  border-top:1px dashed var(--linha); display:flex; flex-wrap:wrap; gap:.25rem 1.1rem; font-variant-numeric: tabular-nums; }
+.conta b { color: var(--tinta); font-weight:500; }
+.conta .ok { color: var(--bom); } .conta .fora { color: var(--ruim); }
+div[data-testid="stChatInput"] { background:#fff; border:1px solid var(--linha); border-radius: 10px; box-shadow: none; transition: border-color .2s; }
+div[data-testid="stChatInput"]:focus-within { border-color: var(--tinta); }
+
+/* começo da conversa */
+.comeco h3 { font-family: var(--serif) !important; font-weight:400; font-size: 2rem; color: var(--tinta); margin: .4rem 0 .3rem; padding:0; }
+.comeco p { color: var(--mudo); margin: 0 0 1rem; }
+button[kind="pills"] { background: transparent !important; border: 1px solid var(--linha) !important; border-radius: 6px !important;
+  color: var(--tinta) !important; transition: border-color .2s, background .2s; }
+button[kind="pills"]:hover { border-color: var(--tinta) !important; background: #fff !important; }
+button[kind="pills"] p::after { content: "  →"; color: var(--mudo); }
+
+/* cupom da conversa */
+.cupom { background:#FFFEFB; border:1px solid var(--linha); border-bottom:none; padding: 1.2rem 1.2rem 1.4rem; font-family: var(--mono);
+  font-size:.8rem; color: var(--tinta); position: relative; animation: surge .6s ease both;
+  box-shadow: 0 1px 0 rgba(0,0,0,.02), 0 10px 20px -16px rgba(0,0,0,.25); }
+.cupom::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-8px; height:8px;
+  background: linear-gradient(-45deg, transparent 6px, #FFFEFB 0) 0 0/12px 8px repeat-x,
+              linear-gradient(45deg, transparent 6px, #FFFEFB 0) 0 0/12px 8px repeat-x; }
+.cupom .tit { text-align:center; letter-spacing:.2em; font-size:.72rem; color: var(--mudo); }
+.cupom hr { border:none; border-top:1px dashed #CFCBC0; margin:.7rem 0; }
+.cupom .l { display:flex; align-items:baseline; gap:.4rem; margin:.28rem 0; }
+.cupom .l span:nth-child(2) { flex:1; border-bottom:1px dotted #CFCBC0; transform: translateY(-3px); }
+.cupom .total { font-weight:500; font-size:.92rem; }
+.cupom .rodape { color: var(--mudo); font-size:.72rem; line-height:1.6; margin-top:.8rem; }
+
+/* painéis de números e notas */
+.faixa { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-top:1px solid var(--tinta);
+  border-bottom:1px solid var(--linha); margin: .2rem 0 2rem; }
+.faixa div { padding: 1rem 1.2rem 1.1rem; border-left:1px solid var(--linha); }
+.faixa div:first-child { border-left:none; padding-left:0; }
+.faixa b { display:block; font-family: var(--mono); font-weight:500; font-size:1.7rem; color: var(--tinta); margin:.35rem 0 .2rem; font-variant-numeric: tabular-nums; }
+.faixa b.acento { color: var(--destaque); }
+.faixa small { color: var(--mudo); font-size:.8rem; }
+.secao h2 { font-family: var(--serif) !important; font-weight:400; font-size: 2.1rem; color: var(--tinta); margin: 0 0 .3rem; padding:0; }
+.secao p { color: var(--mudo); margin: 0 0 1.4rem; max-width: 760px; }
+.graf { font-size:.95rem; font-weight:600; color: var(--tinta); margin: 0 0 .1rem; }
+.graf + .sub { font-size:.82rem; color: var(--mudo); margin-bottom:.2rem; }
+.nota { border-left:2px solid var(--destaque); padding:.2rem 0 .2rem 1rem; color:#3A3935; font-size:.98rem; line-height:1.65;
+  max-width: 880px; margin: 1rem 0; }
+.vazio { padding: 2.5rem 0; color: var(--mudo); }
+.vazio h3 { font-family: var(--serif) !important; font-weight:400; font-size: 1.8rem; color: var(--tinta); margin:0 0 .3rem; padding:0; }
+.stMarkdown h4 { font-family: var(--serif) !important; font-weight:400; font-size:1.6rem; }
 </style>
 """)
 
 
-def cards(itens):
+def faixa(itens):
     html = "".join(
-        f'<div class="card {"destaque" if d else ""}" style="animation-delay:{i * 70}ms">'
-        f'<div class="rot">{r}</div><div class="val">{v}</div><div class="dica">{h}</div></div>'
-        for i, (r, v, h, d) in enumerate(itens)
+        f'<div><span class="rotulo">{r}</span><b class="{"acento" if d else ""}">{v}</b><small>{h}</small></div>'
+        for r, v, h, d in itens
     )
-    st.html(f'<div class="cards">{html}</div>')
+    st.html(f'<div class="faixa">{html}</div>')
 
 
-def grafico(fig, altura=360):
+def titulo_grafico(t, sub=""):
+    st.html(f'<div class="graf">{t}</div>' + (f'<div class="sub">{sub}</div>' if sub else ""))
+
+
+def grafico(fig, altura=340):
     fig.update_layout(
-        height=altura, margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Inter", color="#334155"),
-        legend=dict(orientation="h", y=1.12, x=0), hoverlabel=dict(font_family="Inter"),
+        height=altura, margin=dict(l=4, r=4, t=30, b=4), paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", font=dict(family="IBM Plex Sans", color=MUDO, size=12),
+        legend=dict(orientation="h", y=1.1, x=0, font=dict(size=12)), hoverlabel=dict(font_family="IBM Plex Mono"),
+        bargap=.08,
     )
-    fig.update_xaxes(gridcolor="#EEF0F4", zeroline=False)
-    fig.update_yaxes(gridcolor="#EEF0F4", zeroline=False)
+    fig.update_xaxes(gridcolor="rgba(0,0,0,0)", linecolor=LINHA, zeroline=False, ticks="outside", tickcolor=LINHA)
+    fig.update_yaxes(gridcolor=LINHA, griddash="dot", zeroline=False, linecolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
@@ -179,47 +223,48 @@ if online and not MODELO_RESERVA:
         MODELO_RESERVA = reserva_automatica(CHAVE, MODELO_IA)
     except Exception:
         MODELO_RESERVA = None
+
+eventos = reg["eventos"]
 st.html(f"""
 <div class="topo">
-  <div class="marca">◆ Token<span>Scope</span></div>
-  <div class="status"><i style="background:{VERDE if online else ROSA}"></i>
-  {f"{MODELO_IA} conectado" if online else "IA indisponível"}</div>
+  <div class="marca">TokenScope<small>um estudo sobre o custo de usar IA</small></div>
+  <div class="status"><i style="background:{BOM if online else RUIM}"></i>{MODELO_IA} · {"online" if online else "indisponível"}</div>
 </div>
-<div class="cabeca">
-  <div class="hero">
-    <h1>Use IA. Veja quanto ela custa.</h1>
-    <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com <b>18.924 conversas reais</b>
+<div class="abre">
+  <div>
+    <h1>Use IA. Veja quanto <em>ela custa.</em></h1>
+    <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com 18.924 conversas reais
     prevê quantos tokens a IA vai gerar. Depois, mostramos o consumo real e o custo.</p>
   </div>
-  <div class="mini">
-    <div><span>Respostas geradas</span><b>{br(len(reg["eventos"]))}</b></div>
-    <div><span>Tokens consumidos</span><b>{br(sum(e["entrada"] + e["real"] + e["raciocinio"] for e in reg["eventos"]))}</b></div>
-    <div><span>Custo total</span><b>{usd(sum(e["custo"] for e in reg["eventos"]))}</b></div>
+  <div class="numeros">
+    <div><span class="rotulo">Respostas geradas</span><b>{br(len(eventos))}</b></div>
+    <div><span class="rotulo">Tokens consumidos</span><b>{br(sum(e["entrada"] + e["real"] + e["raciocinio"] for e in eventos))}</b></div>
+    <div><span class="rotulo">Custo total</span><b>{usd(sum(e["custo"] for e in eventos))}</b></div>
   </div>
 </div>
 """)
 
-SECOES = {
-    "Assistente": ":material/chat_bubble: Assistente",
-    "Painel": ":material/monitoring: Painel de consumo",
-    "Algoritmo": ":material/model_training: O algoritmo",
-    "Sobre": ":material/info: Sobre",
-}
+SECOES = {"Assistente": "Assistente", "Painel": "Painel de consumo", "Algoritmo": "O algoritmo", "Sobre": "Sobre"}
 secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Assistente",
                              key="secao", label_visibility="collapsed") or "Assistente"
 
 
-def recibo(m):
+def conta(m):
     dentro = m["p10"] <= m["real"] <= m["p90"]
-    rac = f'<span class="chip">raciocínio <b>{br(m["raciocinio"])}</b></span>' if m["raciocinio"] else ""
-    via = (f'<span class="chip">via <b>{m["modelo"]}</b> (reserva)</span>'
-           if m.get("modelo") and m["modelo"] != MODELO_IA else "")
-    st.html(f"""<div class="recibo">
-      <span class="chip">previsto <b>~{br(m["previsto"])}</b> ({br(m["p10"])}–{br(m["p90"])})</span>
-      <span class="chip {"ok" if dentro else "fora"}">real <b>{br(m["real"])}</b> tokens</span>{rac}
-      <span class="chip">entrada <b>{br(m["entrada"])}</b></span>
-      <span class="chip">custo <b>{usd(m["custo"])}</b></span>
-      <span class="chip">{br(m["segundos"], 1)} s</span>{via}</div>""")
+    partes = [
+        f'previsto <b>~{br(m["previsto"])}</b> ({br(m["p10"])}–{br(m["p90"])})',
+        f'real <b>{br(m["real"])}</b> <span class="{"ok" if dentro else "fora"}">{"✓ na faixa" if dentro else "✕ fora da faixa"}</span>',
+    ]
+    if m["raciocinio"]:
+        partes.append(f'raciocínio <b>{br(m["raciocinio"])}</b>')
+    partes += [f'entrada <b>{br(m["entrada"])}</b>', f'<b>{usd(m["custo"])}</b>', f'{br(m["segundos"], 1)} s']
+    if m.get("modelo") and m["modelo"] != MODELO_IA:
+        partes.append(f'via {m["modelo"]}')
+    st.html(f'<div class="conta">{"".join(f"<span>{p}</span>" for p in partes)}</div>')
+
+
+def quem(nome):
+    st.html(f'<div class="quem">{nome}</div>')
 
 
 # ---------- Assistente ----------
@@ -229,25 +274,29 @@ if secao == "Assistente":
     elif not CHAVE:
         st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
 
-    col_chat, col_lado = st.columns([2.4, 1], gap="large")
+    col_chat, col_lado = st.columns([2.3, 1], gap="large")
     restante = LIMITE_SESSAO - st.session_state.enviadas
     bloqueado = not online or restante <= 0 or reg["chamadas_dia"] >= LIMITE_DIA
 
     with col_lado:
         respostas = [m for m in st.session_state.conversa if m["papel"] == "model"]
         acertos = sum(m["p10"] <= m["real"] <= m["p90"] for m in respostas)
-        st.html(f"""<div class="lado"><h4>Esta conversa</h4>
-          <div class="linha">Respostas <b>{br(len(respostas))}</b></div>
-          <div class="linha">Tokens consumidos <b>{br(sum(m["entrada"] + m["real"] + m["raciocinio"] for m in respostas))}</b></div>
-          <div class="linha">Custo <b>{usd(sum(m["custo"] for m in respostas))}</b></div>
-          <div class="linha">Previsões na faixa <b>{f"{acertos}/{len(respostas)}" if respostas else "–"}</b></div>
-          <div class="legenda">
-            <span class="chip">previsto</span> o que o modelo esperava, com a faixa de 80%<br>
-            <span class="chip ok">real</span> dentro da faixa · <span class="chip fora">real</span> fora da faixa<br>
-            <span class="chip">raciocínio</span> tokens que o Gemini gasta pensando (cobrados como saída)
-          </div>
-          <div class="legenda">{restante} mensagens restantes nesta sessão · preço de tabela: US$ {br(PRECO_IN, 2)}
-          (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens</div></div>""")
+        ent = sum(m["entrada"] for m in respostas)
+        sai = sum(m["real"] + m["raciocinio"] for m in respostas)
+
+        def l(rot, val):
+            return f'<div class="l"><span>{rot}</span><span></span><span>{val}</span></div>'
+        st.html(f"""<div class="cupom">
+          <div class="tit">CUPOM DA CONVERSA</div>
+          <div class="tit">{datetime.now().strftime("%d/%m/%Y %H:%M")}</div><hr>
+          {l("respostas", br(len(respostas)))}
+          {l("tokens de entrada", br(ent))}
+          {l("tokens de saída", br(sai))}
+          {l("previsões na faixa", f"{acertos}/{len(respostas)}" if respostas else "–")}<hr>
+          <div class="l total"><span>TOTAL</span><span></span><span>{usd(sum(m["custo"] for m in respostas))}</span></div><hr>
+          <div class="rodape">preço de tabela por 1M tokens: US$ {br(PRECO_IN, 2)} entrada · US$ {br(PRECO_OUT, 2)} saída<br>
+          raciocínio do modelo é cobrado como saída<br>{restante} mensagens restantes nesta sessão</div>
+        </div>""")
 
     with col_chat:
         caixa = st.container()
@@ -255,18 +304,19 @@ if secao == "Assistente":
             boas_vindas = st.empty()
             if not st.session_state.conversa:
                 with boas_vindas.container():
-                    st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
-                            'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
+                    st.html('<div class="comeco"><h3>Comece com uma pergunta.</h3>'
+                            '<p>Cada resposta vem com a previsão de tokens, o consumo real e o custo.</p></div>')
                     st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
                              label_visibility="collapsed", disabled=not online)
             for m in st.session_state.conversa:
-                with st.chat_message("user" if m["papel"] == "user" else "assistant",
-                                     avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
+                with st.chat_message("user" if m["papel"] == "user" else "assistant"):
+                    if m["papel"] == "model":
+                        quem("Gemini")
                     st.markdown(m["texto"])
                     if m["papel"] == "model":
-                        recibo(m)
+                        conta(m)
         pergunta = st.chat_input(
-            "Escreva sua mensagem…" if restante > 0 else "Limite de mensagens desta sessão atingido",
+            "Escreva sua pergunta…" if restante > 0 else "Limite de mensagens desta sessão atingido",
             disabled=bloqueado) or st.session_state.pop("pendente", None)
 
     if pergunta and not bloqueado:
@@ -275,20 +325,20 @@ if secao == "Assistente":
         prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
         conversa.append({"papel": "user", "texto": pergunta})
         with caixa:
-            with st.chat_message("user", avatar=":material/person:"):
+            with st.chat_message("user"):
                 st.markdown(pergunta)
-            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-                st.html(f'<div class="recibo"><span class="chip">previsão: <b>~{br(prev.mediana * fator)}</b> tokens '
-                        f'({br(prev.p10 * fator)}–{br(prev.p90 * fator)})</span></div>')
+            with st.chat_message("assistant"):
+                quem("Gemini")
                 saida = st.empty()
-                saida.markdown("_Pensando…_")
+                saida.markdown(f"_Pensando… previsão de ~{br(prev.mediana * fator)} tokens "
+                               f"({br(prev.p10 * fator)}–{br(prev.p90 * fator)})_")
                 try:
                     with reg["trava"]:
                         if reg["dia"] != date.today():
                             reg["dia"], reg["chamadas_dia"] = date.today(), 0
                         reg["chamadas_dia"] += 1
                     r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO, reserva=MODELO_RESERVA,
-                                     ao_receber=lambda t: saida.markdown(t + " ▌"))
+                                     ao_receber=lambda t: saida.markdown(t + " ▍"))
                 except ia.GeminiIndisponivel as e:
                     conversa.pop()
                     saida.empty()
@@ -319,43 +369,46 @@ if secao == "Assistente":
 
 # ---------- Painel ----------
 if secao == "Painel":
-    ev = pd.DataFrame(reg["eventos"])
+    st.html('<div class="secao"><h2>Painel de consumo</h2><p>Tudo o que foi gasto pelos visitantes, com os tokens '
+            'que o próprio Gemini informou em cada chamada.</p></div>')
+    ev = pd.DataFrame(eventos)
     if ev.empty:
-        st.html('<div class="vazio"><div class="icone">◔</div><b>Ainda não há uso registrado</b>'
+        st.html('<div class="vazio"><h3>Nada por aqui ainda.</h3>'
                 'Converse com o assistente: cada resposta entra aqui com os tokens e o custo reais.</div>')
     else:
         saida = ev.real + ev.raciocinio
         acerto = ((ev.real >= ev.p10) & (ev.real <= ev.p90)).mean()
-        cards([
+        faixa([
             ("Respostas geradas", br(len(ev)), "por todos os visitantes", False),
             ("Tokens consumidos", br(ev.entrada.sum() + saida.sum()),
              f"{br(ev.entrada.sum())} entrada · {br(saida.sum())} saída", False),
-            ("Acerto da previsão", f"{br(100 * acerto)}%", "respostas dentro da faixa (meta ≈ 80%)", False),
-            ("Custo total", usd(ev.custo.sum()), f"média {usd(ev.custo.mean())} por resposta", True),
+            ("Acerto da previsão", f"{br(100 * acerto)}%", "dentro da faixa de 80%", False),
+            ("Custo total", usd(ev.custo.sum()), f"média de {usd(ev.custo.mean())} por resposta", True),
         ])
-        g1, g2 = st.columns([1.6, 1], gap="large")
+        g1, g2 = st.columns([1.7, 1], gap="large")
         with g1:
-            st.markdown("##### Previsto × real, resposta a resposta")
+            titulo_grafico("Previsto × real, resposta a resposta", "a área clara é a faixa em que o modelo esperava acertar 80% das vezes")
             x = list(range(1, len(ev) + 1))
             fig = go.Figure()
             fig.add_scatter(x=x + x[::-1], y=list(ev.p90) + list(ev.p10[::-1]), fill="toself",
-                            fillcolor="rgba(109,40,217,.10)", line=dict(width=0), name="faixa prevista (80%)",
-                            hoverinfo="skip")
-            fig.add_scatter(x=x, y=ev.previsto, mode="lines+markers", name="previsto",
-                            line=dict(color=ROXO, dash="dot"))
-            fig.add_scatter(x=x, y=ev.real, mode="lines+markers", name="real", line=dict(color=VERDE, width=3))
-            fig.update_layout(xaxis_title="resposta", yaxis_title="tokens da resposta")
+                            fillcolor="rgba(22,22,22,.06)", line=dict(width=0), name="faixa prevista", hoverinfo="skip")
+            fig.add_scatter(x=x, y=ev.previsto, mode="lines", name="previsto", line=dict(color=TINTA, dash="dot", width=1.5))
+            fig.add_scatter(x=x, y=ev.real, mode="lines+markers", name="real", line=dict(color=DESTAQUE, width=2),
+                            marker=dict(size=6))
+            fig.update_layout(xaxis_title="resposta", yaxis_title="tokens")
             grafico(fig)
         with g2:
-            st.markdown("##### Para onde vai o dinheiro")
-            fig = go.Figure(go.Pie(
-                labels=["Entrada", "Resposta", "Raciocínio"],
-                values=[ev.entrada.sum() * PRECO_IN, ev.real.sum() * PRECO_OUT, ev.raciocinio.sum() * PRECO_OUT],
-                hole=.68, marker=dict(colors=[CINZA, ROXO, "#A78BFA"]), textinfo="percent", sort=False))
-            grafico(fig)
+            titulo_grafico("Para onde vai o dinheiro", "participação de cada tipo de token no custo")
+            partes = pd.Series({"Entrada": ev.entrada.sum() * PRECO_IN, "Resposta": ev.real.sum() * PRECO_OUT,
+                                "Raciocínio": ev.raciocinio.sum() * PRECO_OUT})
+            partes = 100 * partes / partes.sum()
+            fig = go.Figure(go.Bar(x=partes.values, y=partes.index, orientation="h",
+                                   marker_color=[CINZA, DESTAQUE, TINTA], text=[f"{br(v)}%" for v in partes.values],
+                                   textposition="outside", hovertemplate="%{x:.1f}%<extra></extra>"))
+            fig.update_layout(xaxis=dict(visible=False, range=[0, 115]), yaxis=dict(autorange="reversed"))
+            grafico(fig, 260)
         st.html(f'<div class="nota">No ritmo atual, <b>10.000 respostas</b> custariam cerca de '
-                f'<b>{usd(ev.custo.mean() * 10_000)}</b>. O dado é real: vem dos tokens que o próprio Gemini informou '
-                f'em cada chamada.</div>')
+                f'<b>{usd(ev.custo.mean() * 10_000)}</b>.</div>')
 
 # ---------- O algoritmo ----------
 if secao == "Algoritmo":
@@ -364,10 +417,10 @@ if secao == "Algoritmo":
     gb = m.loc["Gradient Boosting"]
     real, previsto = modelo.custo_mensal(10_000, PRECO_IN, PRECO_OUT)
     erro_mes = 100 * np.median(np.abs(previsto - real) / real)
-    st.markdown("#### Como a previsão é feita")
-    st.caption("Base pública OpenAssistant (oasst1): 18.924 pares de pergunta → resposta reais. "
-               "Família: aprendizado supervisionado (regressão). Validação em 25% dos dados que o modelo não viu.")
-    cards([
+    st.html('<div class="secao"><h2>Como a previsão é feita</h2><p>Base pública OpenAssistant (oasst1), com 18.924 '
+            'pares de pergunta e resposta reais. Aprendizado supervisionado (regressão), validado em 25% dos dados '
+            'que o modelo não viu durante o treino.</p></div>')
+    faixa([
         ("Conversas na base", br(len(p)), "pares pergunta → resposta", False),
         ("Erro médio", f"{br(gb.mae)} tokens", f"chute ingênuo: {br(m.loc['Baseline (mediana)'].mae)}", False),
         ("Acerto da faixa 80%", f"{br(100 * modelo.cobertura_faixa)}%", "no conjunto de teste", False),
@@ -375,42 +428,41 @@ if secao == "Algoritmo":
     ])
     g1, g2 = st.columns(2, gap="large")
     with g1:
-        st.markdown("##### Distribuição de tokens na base")
+        titulo_grafico("Quantos tokens têm perguntas e respostas", "a resposta costuma ser ~10 vezes maior")
         bins = np.logspace(0, 3.8, 45)
         fig = go.Figure()
-        for col, nome, cor in [("prompt_tokens", "pergunta", CINZA), ("resp_tokens", "resposta", ROXO)]:
+        for col, nome, cor in [("prompt_tokens", "pergunta", CINZA), ("resp_tokens", "resposta", DESTAQUE)]:
             h, e = np.histogram(p[col], bins=bins)
-            fig.add_bar(x=np.sqrt(e[:-1] * e[1:]), y=h, name=nome, marker_color=cor, opacity=.8)
+            fig.add_bar(x=np.sqrt(e[:-1] * e[1:]), y=h, name=nome, marker_color=cor, opacity=.85)
         fig.update_layout(barmode="overlay", xaxis_type="log", xaxis_title="tokens (escala log)", yaxis_title="conversas")
         grafico(fig)
     with g2:
-        st.markdown("##### Erro por resposta (menor é melhor)")
-        fig = go.Figure(go.Bar(x=m.index, y=m.mae, marker_color=[CINZA, "#A78BFA", ROXO],
+        titulo_grafico("Erro por resposta", "quanto menor, melhor")
+        fig = go.Figure(go.Bar(x=m.index, y=m.mae, marker_color=[CINZA, CINZA, DESTAQUE],
                                text=[br(v) for v in m.mae], textposition="outside"))
-        fig.update_layout(yaxis_title="erro médio absoluto (tokens)")
+        fig.update_layout(yaxis_title="erro médio absoluto (tokens)", yaxis_range=[0, m.mae.max() * 1.18])
         grafico(fig)
     g3, g4 = st.columns(2, gap="large")
     with g3:
-        st.markdown("##### O idioma muda o custo")
+        titulo_grafico("O idioma muda o custo", "tokens gastos a cada 1.000 caracteres")
         d = modelo.idiomas.sort_values("tokens_por_1000_caracteres")
         fig = go.Figure(go.Bar(
             x=d.tokens_por_1000_caracteres, y=[NOMES_IDIOMAS[l] for l in d.lang], orientation="h",
-            marker_color=[ROXO if l == "pt-BR" else "#C4B5FD" for l in d.lang],
+            marker_color=[DESTAQUE if l == "pt-BR" else CINZA for l in d.lang],
             hovertemplate="%{x:.0f} tokens<extra></extra>"))
-        fig.update_layout(xaxis_title="tokens a cada 1.000 caracteres")
         grafico(fig)
     with g4:
-        st.markdown("##### Custo de 10.000 respostas: previsto × real")
+        titulo_grafico("Custo de 10.000 respostas", "2.000 simulações: o previsto fica colado no real")
         fig = go.Figure()
-        fig.add_histogram(x=real, name="real", marker_color=CINZA, opacity=.75, nbinsx=50)
-        fig.add_histogram(x=previsto, name="previsto", marker_color=ROXO, opacity=.75, nbinsx=50)
+        fig.add_histogram(x=real, name="real", marker_color=CINZA, opacity=.8, nbinsx=50)
+        fig.add_histogram(x=previsto, name="previsto", marker_color=DESTAQUE, opacity=.75, nbinsx=50)
         fig.update_layout(barmode="overlay", xaxis_title="US$", yaxis_title="simulações")
         grafico(fig)
     st.html(f"""
     <div class="nota"><b>O que os dados mostram.</b> Prever o tamanho de <i>uma</i> resposta é difícil: o modelo explica
     ~{br(100 * gb.r2)}% da variação e bate o chute ingênuo por pouco. Mas uma aplicação paga milhares de respostas, e na
     soma os erros se compensam: o custo de 10.000 respostas fica a ~{br(erro_mes)}% do real. A faixa de 80% acerta
-    {br(100 * modelo.cobertura_faixa)}% das vezes no teste, e o <b>Painel de consumo</b> mede a mesma coisa contra o Gemini, ao vivo.</div>""")
+    {br(100 * modelo.cobertura_faixa)}% das vezes no teste, e o painel de consumo mede a mesma coisa contra o Gemini, ao vivo.</div>""")
 
 # ---------- Sobre ----------
 if secao == "Sobre":
