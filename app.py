@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import ia
-from core.modelo import NOMES_IDIOMAS, ModeloTokens
+from core.modelo import NOMES_IDIOMAS, ModeloTokens, contar_tokens
 
 st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
 
@@ -225,6 +225,21 @@ if online and not MODELO_RESERVA:
         MODELO_RESERVA = None
 
 eventos = reg["eventos"]
+
+
+def ajuste_ao_vivo(evs, minimo=3):
+    """Quanto o Gemini fala a mais (ou a menos) que as respostas humanas da base.
+
+    Mediana da razão real / previsto-base nas respostas já observadas, em escala log.
+    O modelo foi treinado com respostas de pessoas; este fator o adapta ao estilo do Gemini (aprendizado online).
+    """
+    razoes = [np.log(e["real"]) - np.log(e["base"]) for e in evs if e.get("base") and e["real"] > 0]
+    return (float(np.exp(np.median(razoes))) if len(razoes) >= minimo else 1.0), len(razoes)
+
+
+ajuste, n_ajuste = ajuste_ao_vivo(eventos)
+texto_ajuste = (f"ajuste ao vivo: ×{br(ajuste, 2)} ({n_ajuste} respostas do Gemini)" if n_ajuste >= 3
+                else f"ajuste ao vivo: começa após 3 respostas ({n_ajuste}/3)")
 st.html(f"""
 <div class="topo">
   <div class="marca">TokenScope<small>um estudo sobre o custo de usar IA</small></div>
@@ -295,7 +310,7 @@ if secao == "Assistente":
           {l("previsões na faixa", f"{acertos}/{len(respostas)}" if respostas else "–")}<hr>
           <div class="l total"><span>TOTAL</span><span></span><span>{usd(sum(m["custo"] for m in respostas))}</span></div><hr>
           <div class="rodape">preço de tabela por 1M tokens: US$ {br(PRECO_IN, 2)} entrada · US$ {br(PRECO_OUT, 2)} saída<br>
-          raciocínio do modelo é cobrado como saída<br>{restante} mensagens restantes nesta sessão</div>
+          raciocínio do modelo é cobrado como saída<br>{texto_ajuste}<br>{restante} mensagens restantes nesta sessão</div>
         </div>""")
 
     with col_chat:
@@ -323,6 +338,7 @@ if secao == "Assistente":
         boas_vindas.empty()
         conversa = st.session_state.conversa
         prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
+        escala = fator * ajuste
         conversa.append({"papel": "user", "texto": pergunta})
         with caixa:
             with st.chat_message("user"):
@@ -330,8 +346,8 @@ if secao == "Assistente":
             with st.chat_message("assistant"):
                 quem("Gemini")
                 saida = st.empty()
-                saida.markdown(f"_Pensando… previsão de ~{br(prev.mediana * fator)} tokens "
-                               f"({br(prev.p10 * fator)}–{br(prev.p90 * fator)})_")
+                saida.markdown(f"_Pensando… previsão de ~{br(prev.mediana * escala)} tokens "
+                               f"({br(prev.p10 * escala)}–{br(prev.p90 * escala)})_")
                 try:
                     with reg["trava"]:
                         if reg["dia"] != date.today():
@@ -354,10 +370,13 @@ if secao == "Assistente":
                     st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
                 else:
                     st.session_state.enviadas += 1
+                    real = r.resposta_tokens
+                    if not real and r.texto:  # a API não informou: estima pelo tokenizador calibrado
+                        real = round(contar_tokens(r.texto) * fator)
                     resp = {
-                        "papel": "model", "texto": r.texto,
-                        "previsto": prev.mediana * fator, "p10": prev.p10 * fator, "p90": prev.p90 * fator,
-                        "real": r.resposta_tokens, "raciocinio": r.raciocinio_tokens, "entrada": r.prompt_tokens,
+                        "papel": "model", "texto": r.texto, "base": prev.mediana * fator,
+                        "previsto": prev.mediana * escala, "p10": prev.p10 * escala, "p90": prev.p90 * escala,
+                        "real": real, "raciocinio": r.raciocinio_tokens, "entrada": r.prompt_tokens,
                         "segundos": r.segundos, "modelo": r.modelo,
                         "custo": (r.prompt_tokens * PRECO_IN + (r.resposta_tokens + r.raciocinio_tokens) * PRECO_OUT) / 1e6,
                     }
@@ -382,7 +401,7 @@ if secao == "Painel":
             ("Respostas geradas", br(len(ev)), "por todos os visitantes", False),
             ("Tokens consumidos", br(ev.entrada.sum() + saida.sum()),
              f"{br(ev.entrada.sum())} entrada · {br(saida.sum())} saída", False),
-            ("Acerto da previsão", f"{br(100 * acerto)}%", "dentro da faixa de 80%", False),
+            ("Acerto da previsão", f"{br(100 * acerto)}%", f"dentro da faixa de 80% · {texto_ajuste}", False),
             ("Custo total", usd(ev.custo.sum()), f"média de {usd(ev.custo.mean())} por resposta", True),
         ])
         g1, g2 = st.columns([1.7, 1], gap="large")
@@ -409,6 +428,10 @@ if secao == "Painel":
             grafico(fig, 260)
         st.html(f'<div class="nota">No ritmo atual, <b>10.000 respostas</b> custariam cerca de '
                 f'<b>{usd(ev.custo.mean() * 10_000)}</b>.</div>')
+        st.html(f'<div class="nota"><b>Por que existe um ajuste ao vivo.</b> O modelo aprendeu com respostas escritas '
+                f'por pessoas, que são mais curtas que as de um assistente comercial. A cada resposta do Gemini, o app '
+                f'mede essa diferença e corrige as próximas previsões. Hoje: {texto_ajuste}. As primeiras respostas, '
+                f'antes do ajuste, tendem a cair fora da faixa: é o modelo aprendendo.</div>')
 
 # ---------- O algoritmo ----------
 if secao == "Algoritmo":
