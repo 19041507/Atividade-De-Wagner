@@ -47,24 +47,36 @@ st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 html, body, [class*="css"], .stMarkdown, button, input, textarea { font-family: 'Inter', sans-serif !important; }
-.block-container { padding-top: 4.2rem; padding-bottom: 3rem; max-width: 1080px; }
+.block-container, div[data-testid="stMainBlockContainer"] { padding: 3.4rem 2.6rem 2rem; max-width: 100%; }
 header[data-testid="stHeader"] { background: transparent; }
 section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] { display: none; }
 @keyframes sobe { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes brilho { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 @keyframes pulso { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .topo { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-  margin-bottom: 2.2rem; animation: sobe .5s ease both; }
+  margin-bottom: 1.4rem; animation: sobe .5s ease both; }
 .marca { font-weight:800; font-size:1.15rem; letter-spacing:-.01em; color:#0F172A; }
 .marca span { color:#6D28D9; }
 .status { font-size:.8rem; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4; padding:.35rem .75rem; border-radius:999px; }
 .status i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.45rem; vertical-align:middle; animation: pulso 2s infinite; }
-.hero { animation: sobe .7s ease both; margin-bottom: 1.8rem; }
+.cabeca { display:grid; grid-template-columns: minmax(0,1.35fr) minmax(0,1fr); gap: 28px; align-items:end; margin-bottom: 1.4rem; }
+@media (max-width: 900px) { .cabeca { grid-template-columns: 1fr; } }
+.hero { animation: sobe .7s ease both; }
+.mini { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; animation: sobe .8s ease both; }
+.mini div { background:#FBFAFF; border:1px solid #EEEAFB; border-radius:14px; padding:12px 14px; }
+.mini span { display:block; font-size:.7rem; color:#64748B; text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+.mini b { display:block; font-size:1.25rem; color:#0F172A; margin-top:.15rem; letter-spacing:-.01em; }
+.lado { background:#FBFAFF; border:1px solid #EEEAFB; border-radius:18px; padding:18px; animation: sobe .6s ease both; }
+.lado h4 { margin:0 0 .8rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:#6D28D9; }
+.linha { display:flex; justify-content:space-between; align-items:baseline; padding:.55rem 0; border-bottom:1px solid #EEEAFB; font-size:.88rem; color:#475569; }
+.linha:last-of-type { border-bottom:none; } .linha b { color:#0F172A; font-size:1rem; }
+.legenda { margin-top:1rem; font-size:.8rem; color:#64748B; line-height:1.9; }
+div[data-testid="stSegmentedControl"] { margin-bottom: .6rem; }
 .hero h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 800; line-height:1.1; margin:0 0 .6rem; letter-spacing:-.03em;
   padding-bottom:.1em;
   background: linear-gradient(90deg,#1E1B4B,#6D28D9,#10B981,#6D28D9); background-size:300% 100%;
   -webkit-background-clip:text; background-clip:text; color:transparent; animation: brilho 12s ease infinite; }
-.hero p { color:#64748B; font-size:1rem; line-height:1.6; max-width: 680px; margin:0; }
+.hero p { color:#64748B; font-size:.98rem; line-height:1.55; max-width: 640px; margin:0; }
 .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: .4rem 0 1.2rem; }
 .card { background:#fff; border:1px solid #EEF0F4; border-radius:16px; padding:18px 20px;
   box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .25s ease, box-shadow .25s ease, border-color .25s;
@@ -82,22 +94,15 @@ section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] {
   padding:.2rem .6rem; border-radius:999px; }
 .chip b { color:#0F172A; } .chip.ok { background:#ECFDF5; border-color:#D1FAE5; color:#047857; }
 .chip.fora { background:#FFF1F2; border-color:#FFE4E6; color:#BE123C; }
-.vazio { text-align:center; color:#64748B; padding:1.8rem 1rem 1.2rem; animation: sobe .6s ease both; }
-.vazio .icone { width:44px; height:44px; margin:0 auto .8rem; border-radius:14px; display:flex; align-items:center;
+.vazio { color:#64748B; padding:.6rem 0 1rem; animation: sobe .6s ease both; }
+.vazio .icone { width:44px; height:44px; margin:0 0 .8rem; border-radius:14px; display:flex; align-items:center;
   justify-content:center; font-size:1.3rem; color:#fff; background:linear-gradient(135deg,#7C3AED,#10B981);
   box-shadow:0 10px 24px -10px rgba(109,40,217,.6); }
 .vazio b { color:#0F172A; display:block; font-size:1.1rem; margin-bottom:.25rem; }
-.stTabs [data-baseweb="tab-list"] { gap: 4px; background:#F5F3FA; padding:4px; border-radius:14px; width:fit-content; max-width:100%; overflow-x:auto; }
-.stTabs [data-baseweb="tab"] { border-radius: 10px; padding: 8px 16px; height:auto; color:#475569; transition: background .2s, color .2s; }
-.stTabs [data-baseweb="tab"]:hover { color:#6D28D9; }
-.stTabs [aria-selected="true"] { background:#fff; color:#6D28D9; box-shadow:0 1px 3px rgba(15,23,42,.08); }
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display:none; }
-.stTabs [data-baseweb="tab-panel"] { padding-top: 1.6rem; }
 div[data-testid="stChatMessage"] { animation: sobe .4s ease both; border-radius:16px; padding:14px 16px; margin-bottom:.6rem;
   background:#FFFFFF; border:1px solid #EEF0F4; }
 div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background:#F8FAFC; border-color:#F1F5F9; }
 div[data-testid="stChatInput"] { border-radius:16px; box-shadow:0 8px 30px -12px rgba(15,23,42,.18); }
-div[data-testid="stPills"] { display:flex; justify-content:center; }
 div[data-testid="stPills"] button { border-radius:999px; transition: transform .2s, border-color .2s; }
 div[data-testid="stPills"] button:hover { transform: translateY(-1px); border-color:#C4B5FD; color:#6D28D9; }
 textarea { border-radius:12px !important; }
@@ -169,16 +174,28 @@ st.html(f"""
   <div class="status"><i style="background:{VERDE if online else ROSA}"></i>
   {f"{MODELO_IA} conectado" if online else "IA indisponível"}</div>
 </div>
-<div class="hero">
-  <h1>Use IA. Veja quanto ela custa.</h1>
-  <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com <b>18.924 conversas reais</b>
-  prevê quantos tokens a IA vai gerar. Depois, mostramos o consumo real e o custo, e o painel acumula o uso de todos.</p>
+<div class="cabeca">
+  <div class="hero">
+    <h1>Use IA. Veja quanto ela custa.</h1>
+    <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com <b>18.924 conversas reais</b>
+    prevê quantos tokens a IA vai gerar. Depois, mostramos o consumo real e o custo.</p>
+  </div>
+  <div class="mini">
+    <div><span>Respostas geradas</span><b>{br(len(reg["eventos"]))}</b></div>
+    <div><span>Tokens consumidos</span><b>{br(sum(e["entrada"] + e["real"] + e["raciocinio"] for e in reg["eventos"]))}</b></div>
+    <div><span>Custo total</span><b>{usd(sum(e["custo"] for e in reg["eventos"]))}</b></div>
+  </div>
 </div>
 """)
 
-aba_chat, aba_painel, aba_algo, aba_sobre = st.tabs([
-    ":material/chat_bubble: Assistente", ":material/monitoring: Painel de consumo",
-    ":material/model_training: O algoritmo", ":material/info: Sobre"])
+SECOES = {
+    "Assistente": ":material/chat_bubble: Assistente",
+    "Painel": ":material/monitoring: Painel de consumo",
+    "Algoritmo": ":material/model_training: O algoritmo",
+    "Sobre": ":material/info: Sobre",
+}
+secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Assistente",
+                             key="secao", label_visibility="collapsed") or "Assistente"
 
 
 def recibo(m):
@@ -193,35 +210,51 @@ def recibo(m):
 
 
 # ---------- Assistente ----------
-with aba_chat:
+if secao == "Assistente":
     if erro_calibracao:
         st.warning(f"O Gemini recusou a conexão: {erro_calibracao}")
     elif not CHAVE:
         st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
 
-    caixa = st.container()
-    with caixa:
-        boas_vindas = st.empty()
-        if not st.session_state.conversa:
-            with boas_vindas.container():
-                st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
-                        'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
-                st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
-                         label_visibility="collapsed", disabled=not online)
-        for m in st.session_state.conversa:
-            with st.chat_message("user" if m["papel"] == "user" else "assistant",
-                                 avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
-                st.markdown(m["texto"])
-                if m["papel"] == "model":
-                    recibo(m)
-
+    col_chat, col_lado = st.columns([2.4, 1], gap="large")
     restante = LIMITE_SESSAO - st.session_state.enviadas
     bloqueado = not online or restante <= 0 or reg["chamadas_dia"] >= LIMITE_DIA
-    pergunta = st.chat_input(
-        "Escreva sua mensagem…" if restante > 0 else "Limite de mensagens desta sessão atingido",
-        disabled=bloqueado) or st.session_state.pop("pendente", None)
-    st.caption(f"{restante} mensagens restantes nesta sessão · preço de tabela: "
-               f"US$ {br(PRECO_IN, 2)} (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens")
+
+    with col_lado:
+        respostas = [m for m in st.session_state.conversa if m["papel"] == "model"]
+        acertos = sum(m["p10"] <= m["real"] <= m["p90"] for m in respostas)
+        st.html(f"""<div class="lado"><h4>Esta conversa</h4>
+          <div class="linha">Respostas <b>{br(len(respostas))}</b></div>
+          <div class="linha">Tokens consumidos <b>{br(sum(m["entrada"] + m["real"] + m["raciocinio"] for m in respostas))}</b></div>
+          <div class="linha">Custo <b>{usd(sum(m["custo"] for m in respostas))}</b></div>
+          <div class="linha">Previsões na faixa <b>{f"{acertos}/{len(respostas)}" if respostas else "–"}</b></div>
+          <div class="legenda">
+            <span class="chip">previsto</span> o que o modelo esperava, com a faixa de 80%<br>
+            <span class="chip ok">real</span> dentro da faixa · <span class="chip fora">real</span> fora da faixa<br>
+            <span class="chip">raciocínio</span> tokens que o Gemini gasta pensando (cobrados como saída)
+          </div>
+          <div class="legenda">{restante} mensagens restantes nesta sessão · preço de tabela: US$ {br(PRECO_IN, 2)}
+          (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens</div></div>""")
+
+    with col_chat:
+        caixa = st.container()
+        with caixa:
+            boas_vindas = st.empty()
+            if not st.session_state.conversa:
+                with boas_vindas.container():
+                    st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
+                            'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
+                    st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
+                             label_visibility="collapsed", disabled=not online)
+            for m in st.session_state.conversa:
+                with st.chat_message("user" if m["papel"] == "user" else "assistant",
+                                     avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
+                    st.markdown(m["texto"])
+                    if m["papel"] == "model":
+                        recibo(m)
+        pergunta = st.chat_input(
+            "Escreva sua mensagem…" if restante > 0 else "Limite de mensagens desta sessão atingido",
+            disabled=bloqueado) or st.session_state.pop("pendente", None)
 
     if pergunta and not bloqueado:
         boas_vindas.empty()
@@ -251,6 +284,7 @@ with aba_chat:
                     else:
                         st.warning("O Gemini não respondeu a tempo (instabilidade do Google). "
                                    "Tentamos algumas vezes sem sucesso. Envie de novo em alguns segundos.")
+                    st.caption(f"Detalhe técnico: {str(e)[:160]}")
                 except Exception as e:
                     conversa.pop()
                     saida.empty()
@@ -271,7 +305,7 @@ with aba_chat:
                     st.rerun()
 
 # ---------- Painel ----------
-with aba_painel:
+if secao == "Painel":
     ev = pd.DataFrame(reg["eventos"])
     if ev.empty:
         st.html('<div class="vazio"><div class="icone">◔</div><b>Ainda não há uso registrado</b>'
@@ -311,7 +345,7 @@ with aba_painel:
                 f'em cada chamada.</div>')
 
 # ---------- O algoritmo ----------
-with aba_algo:
+if secao == "Algoritmo":
     p = modelo.pares
     m = modelo.metricas.set_index("modelo")
     gb = m.loc["Gradient Boosting"]
@@ -366,7 +400,7 @@ with aba_algo:
     {br(100 * modelo.cobertura_faixa)}% das vezes no teste, e o <b>Painel de consumo</b> mede a mesma coisa contra o Gemini, ao vivo.</div>""")
 
 # ---------- Sobre ----------
-with aba_sobre:
+if secao == "Sobre":
     c1, c2 = st.columns(2, gap="large")
     with c1:
         st.markdown("""
