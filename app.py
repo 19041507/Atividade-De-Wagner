@@ -147,6 +147,30 @@ button[kind="pills"] p::after { content: "  →"; color: var(--mudo); }
 .vazio { padding: 2.5rem 0; color: var(--mudo); }
 .vazio h3 { font-family: var(--serif) !important; font-weight:400; font-size: 1.8rem; color: var(--tinta); margin:0 0 .3rem; padding:0; }
 .stMarkdown h4 { font-family: var(--serif) !important; font-weight:400; font-size:1.6rem; }
+
+/* como funciona */
+.duas { display:grid; grid-template-columns: 1fr 1fr; border-top:1px solid var(--tinta); margin-bottom: 2.4rem; }
+@media (max-width: 900px) { .duas { grid-template-columns: 1fr; } }
+.duas > div { padding: 1.2rem 1.6rem 1.4rem 0; }
+.duas > div + div { border-left:1px solid var(--linha); padding-left: 1.6rem; }
+.duas h3 { font-family: var(--serif) !important; font-weight:400; font-size:1.7rem; color: var(--tinta); margin:.3rem 0 .5rem; padding:0; }
+.duas p, .duas li { color:#3A3935; font-size:.95rem; line-height:1.6; }
+.duas ul { margin:.4rem 0 0; padding-left:1.1rem; }
+.passos { counter-reset: passo; border-top:1px solid var(--tinta); margin-bottom: 2.4rem; }
+.passo { display:grid; grid-template-columns: 4.2rem minmax(0,1.2fr) minmax(0,1fr); gap: 1.4rem; padding: 1.2rem 0;
+  border-bottom:1px solid var(--linha); align-items:start; }
+@media (max-width: 900px) { .passo { grid-template-columns: 3rem 1fr; } .passo .formula { grid-column: 2; } }
+.passo::before { counter-increment: passo; content: counter(passo, decimal-leading-zero); font-family: var(--serif);
+  font-size: 2.2rem; line-height: 1; color: var(--destaque); }
+.passo h4 { font-family: var(--sans) !important; font-size: 1rem !important; font-weight:600; color: var(--tinta); margin:0 0 .3rem; padding:0; }
+.passo p { color:#3A3935; font-size:.93rem; line-height:1.6; margin:0; }
+.passo .quemfaz { display:inline-block; font-size:.66rem; letter-spacing:.09em; text-transform:uppercase; font-weight:500;
+  color: var(--mudo); border:1px solid var(--linha); padding:.05rem .45rem; border-radius:3px; margin-bottom:.45rem; }
+.passo .quemfaz.ml { color: var(--destaque); border-color:#EBC9B6; }
+.passo .quemfaz.gem { color: var(--bom); border-color:#C9D9CE; }
+.formula { font-family: var(--mono); font-size:.8rem; color: var(--tinta); background:#FFFEFB; border:1px solid var(--linha);
+  padding:.75rem .9rem; line-height:1.75; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+.formula i { color: var(--mudo); font-style: normal; }
 </style>
 """)
 
@@ -259,7 +283,8 @@ st.html(f"""
 </div>
 """)
 
-SECOES = {"Assistente": "Assistente", "Painel": "Painel de consumo", "Algoritmo": "O algoritmo", "Sobre": "Sobre"}
+SECOES = {"Assistente": "Assistente", "Painel": "Painel de consumo", "Como": "Como funciona",
+          "Algoritmo": "O algoritmo", "Sobre": "Sobre"}
 secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Assistente",
                              key="secao", label_visibility="collapsed") or "Assistente"
 
@@ -432,6 +457,77 @@ if secao == "Painel":
                 f'por pessoas, que são mais curtas que as de um assistente comercial. A cada resposta do Gemini, o app '
                 f'mede essa diferença e corrige as próximas previsões. Hoje: {texto_ajuste}. As primeiras respostas, '
                 f'antes do ajuste, tendem a cair fora da faixa: é o modelo aprendendo.</div>')
+
+# ---------- Como funciona ----------
+if secao == "Como":
+    st.html('<div class="secao"><h2>Como a IA participa do cálculo</h2><p>Duas IAs trabalham juntas: uma prevê, '
+            'a outra responde. Comparando as duas, sabemos se a previsão acerta, e o modelo usa as respostas reais '
+            'para se corrigir sozinho.</p></div>')
+    st.html(f"""<div class="duas">
+      <div><span class="rotulo">IA aplicada · o nosso algoritmo</span><h3>A que prevê</h3>
+        <p>Um modelo de aprendizado de máquina (<b>Gradient Boosting</b>) treinado com {br(len(modelo.pares))} conversas
+        reais do OpenAssistant. Ninguém escreveu a regra à mão: ele aprendeu, a partir dos dados, a relação entre a
+        pergunta e o tamanho da resposta.</p>
+        <ul><li>faz a previsão e a faixa de 80% <b>antes</b> de o Gemini responder</li>
+        <li>se corrige com cada resposta nova (aprendizado online)</li></ul></div>
+      <div><span class="rotulo">IA generativa · Gemini, via API key</span><h3>A que responde</h3>
+        <p>O <b>{MODELO_IA}</b> gera a resposta de verdade e informa quantos tokens gastou. Ele não faz a previsão,
+        mas participa do cálculo em três pontos:</p>
+        <ul><li><b>calibração:</b> conta os tokens de 300 respostas da base com o tokenizador dele</li>
+        <li><b>valor real:</b> informa entrada, resposta e raciocínio de cada chamada</li>
+        <li><b>ajuste ao vivo:</b> o tamanho das respostas dele ensina o modelo a se corrigir</li></ul></div>
+    </div>""")
+
+    ex = modelo.prever("Explique juros compostos com um exemplo", "pt-BR")
+    st.html(f"""<div class="passos">
+      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Treino, uma vez ao ligar o app</h4>
+        <p>Cada conversa da base vira uma linha: as características da pergunta e o tamanho da resposta. Três modelos são
+        treinados com 75% das conversas: um para o valor central, um para o percentil 10 e um para o percentil 90.
+        Os 25% restantes ficam guardados para o teste.</p></div>
+        <div class="formula"><i>características da pergunta</i>
+log(1 + tokens) · tem código? · nº de "?"
+é continuação? · idioma
+<i>alvo</i>
+log(1 + tokens da resposta)</div></div>
+
+      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>Calibração da régua de tokens</h4>
+        <p>Cada modelo de IA corta o texto em tokens de um jeito. O app envia 300 respostas da base ao contador do
+        Gemini e compara com o tokenizador usado no treino. O resultado converte a previsão para a unidade que o Gemini cobra.</p></div>
+        <div class="formula">fator = tokens do Gemini ÷ tokens o200k
+<i>agora:</i> fator = {br(fator, 2)}</div></div>
+
+      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Previsão, antes de cada resposta</h4>
+        <p>Quando você envia a pergunta, o modelo prevê o tamanho da resposta e a faixa de 80%. A previsão é convertida
+        pela calibração e corrigida pelo ajuste ao vivo.</p></div>
+        <div class="formula">previsão = modelo(pergunta) × fator × ajuste
+<i>ex.: "Explique juros compostos com um exemplo"</i>
+modelo:   ~{br(ex.mediana)} ({br(ex.p10)}–{br(ex.p90)})
+× fator:  ~{br(ex.mediana * fator)} ({br(ex.p10 * fator)}–{br(ex.p90 * fator)})
+× ajuste: ~{br(ex.mediana * fator * ajuste)} ({br(ex.p10 * fator * ajuste)}–{br(ex.p90 * fator * ajuste)})</div></div>
+
+      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>Resposta e consumo real</h4>
+        <p>O Gemini gera a resposta e a própria API informa os tokens. A resposta está <b>na faixa</b> quando o tamanho
+        real fica entre os percentis 10 e 90. O raciocínio entra no custo, mas não na comparação: a base só tem texto.</p></div>
+        <div class="formula">entrada    = prompt_token_count
+resposta   = candidates_token_count
+raciocínio = thoughts_token_count
+<i>acerto:</i> p10 ≤ resposta ≤ p90</div></div>
+
+      <div class="passo"><div><span class="quemfaz ml">aprendizado online</span><h4>Ajuste ao vivo</h4>
+        <p>O modelo aprendeu com respostas escritas por pessoas, mais curtas que as de um assistente comercial.
+        A partir da 3ª resposta real, o app mede quantas vezes o Gemini fala mais que a base e corrige as próximas previsões.</p></div>
+        <div class="formula">ajuste = exp( mediana( log real − log previsto ) )
+<i>agora:</i> {texto_ajuste}</div></div>
+
+      <div class="passo"><div><span class="quemfaz">conta simples</span><h4>Custo</h4>
+        <p>Multiplicação pelo preço de tabela, por milhão de tokens. O raciocínio do modelo é cobrado como saída.</p></div>
+        <div class="formula">custo = ( entrada × US$ {br(PRECO_IN, 2)}
+        + (resposta + raciocínio) × US$ {br(PRECO_OUT, 2)} ) ÷ 1.000.000</div></div>
+    </div>""")
+
+    st.html('<div class="nota"><b>O que não é IA.</b> Contar os tokens da pergunta (regra fixa de corte de texto), '
+            'calcular o custo (multiplicação) e a simulação de Monte Carlo (sorteio e soma). A IA está em aprender com os '
+            'dados, prever e se corrigir, e em gerar a resposta.</div>')
 
 # ---------- O algoritmo ----------
 if secao == "Algoritmo":
