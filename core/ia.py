@@ -24,14 +24,30 @@ def _cliente(chave: str):
     return genai.Client(api_key=chave)
 
 
-def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str) -> RespostaIA:
-    """mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual."""
-    from google.genai import types
+TRANSITORIOS = {429, 500, 503, 504}  # sobrecarga ou limite: vale tentar de novo
+ESPERAS = [2, 5]  # segundos entre as tentativas
+
+
+def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
+              reserva: str | None = None) -> RespostaIA:
+    """mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
+
+    Em erro transitório, tenta de novo no mesmo modelo e, se houver, por último no modelo reserva.
+    """
+    from google.genai import errors, types
     contents = [types.Content(role=m["papel"], parts=[types.Part(text=m["texto"])]) for m in mensagens]
     config = types.GenerateContentConfig(system_instruction=instrucao)
-    inicio = time.perf_counter()
     cliente = _cliente(chave)
-    r = cliente.models.generate_content(model=modelo, contents=contents, config=config)
+    tentativas = [modelo] * (len(ESPERAS) + 1) + ([reserva] if reserva else [])
+    for i, nome in enumerate(tentativas):
+        try:
+            inicio = time.perf_counter()
+            r = cliente.models.generate_content(model=nome, contents=contents, config=config)
+            break
+        except errors.APIError as e:
+            if e.code not in TRANSITORIOS or i == len(tentativas) - 1:
+                raise
+            time.sleep(ESPERAS[i] if i < len(ESPERAS) else 0)
     uso = r.usage_metadata
     return RespostaIA(
         texto=r.text or "",

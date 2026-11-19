@@ -37,6 +37,7 @@ def config(nome, padrao):
 
 CHAVE = config("GEMINI_API_KEY", None)
 MODELO_IA = config("GEMINI_MODEL", "gemini-3.8-flash")
+MODELO_RESERVA = config("GEMINI_MODEL_RESERVA", None)  # usado se o principal estiver sobrecarregado
 PRECO_IN = float(config("PRECO_ENTRADA", 0.30))   # US$ por 1M tokens
 PRECO_OUT = float(config("PRECO_SAIDA", 2.50))    # US$ por 1M tokens (inclui raciocínio)
 LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))
@@ -236,12 +237,17 @@ with aba_chat:
                             if reg["dia"] != date.today():
                                 reg["dia"], reg["chamadas_dia"] = date.today(), 0
                             reg["chamadas_dia"] += 1
-                        r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO)
+                        r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO, reserva=MODELO_RESERVA)
                 except Exception as e:
                     conversa.pop()
-                    msg = str(e)
-                    st.warning("O Gemini está no limite de uso agora. Tente de novo em um minuto."
-                               if "429" in msg or "RESOURCE_EXHAUSTED" in msg else f"Erro ao chamar o Gemini: {msg[:200]}")
+                    codigo = getattr(e, "code", None)
+                    if codigo in (500, 503, 504):
+                        st.warning("O Gemini está sobrecarregado agora (instabilidade do Google). "
+                                   "Tentamos algumas vezes sem sucesso. Envie de novo em alguns segundos.")
+                    elif codigo == 429:
+                        st.warning("O limite de uso do Gemini foi atingido. Tente de novo em um minuto.")
+                    else:
+                        st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
                 else:
                     st.session_state.enviadas += 1
                     resp = {
