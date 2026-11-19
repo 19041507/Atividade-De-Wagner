@@ -37,7 +37,7 @@ def config(nome, padrao):
 
 CHAVE = config("GEMINI_API_KEY", None)
 MODELO_IA = config("GEMINI_MODEL", "gemini-3.8-flash")
-MODELO_RESERVA = config("GEMINI_MODEL_RESERVA", None)  # usado se o principal estiver sobrecarregado
+RESERVA_FIXA = config("GEMINI_MODEL_RESERVA", None)  # se vazio, o app escolhe um Flash leve disponível na chave
 PRECO_IN = float(config("PRECO_ENTRADA", 0.30))   # US$ por 1M tokens
 PRECO_OUT = float(config("PRECO_SAIDA", 2.50))    # US$ por 1M tokens (inclui raciocínio)
 LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))
@@ -150,6 +150,11 @@ def registro():
     return {"trava": threading.Lock(), "eventos": [], "dia": date.today(), "chamadas_dia": 0}
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def reserva_automatica(_chave, principal):
+    return ia.escolher_reserva(_chave, principal)
+
+
 @st.cache_data(show_spinner=False)
 def calibrar(_chave, modelo):
     return ia.fator_calibracao(_chave, modelo)
@@ -168,6 +173,12 @@ if CHAVE:
         erro_calibracao = str(e)[:200]
 
 online = bool(CHAVE) and erro_calibracao is None
+MODELO_RESERVA = RESERVA_FIXA
+if online and not MODELO_RESERVA:
+    try:
+        MODELO_RESERVA = reserva_automatica(CHAVE, MODELO_IA)
+    except Exception:
+        MODELO_RESERVA = None
 st.html(f"""
 <div class="topo">
   <div class="marca">◆ Token<span>Scope</span></div>
@@ -201,12 +212,14 @@ secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, de
 def recibo(m):
     dentro = m["p10"] <= m["real"] <= m["p90"]
     rac = f'<span class="chip">raciocínio <b>{br(m["raciocinio"])}</b></span>' if m["raciocinio"] else ""
+    via = (f'<span class="chip">via <b>{m["modelo"]}</b> (reserva)</span>'
+           if m.get("modelo") and m["modelo"] != MODELO_IA else "")
     st.html(f"""<div class="recibo">
       <span class="chip">previsto <b>~{br(m["previsto"])}</b> ({br(m["p10"])}–{br(m["p90"])})</span>
       <span class="chip {"ok" if dentro else "fora"}">real <b>{br(m["real"])}</b> tokens</span>{rac}
       <span class="chip">entrada <b>{br(m["entrada"])}</b></span>
       <span class="chip">custo <b>{usd(m["custo"])}</b></span>
-      <span class="chip">{br(m["segundos"], 1)} s</span></div>""")
+      <span class="chip">{br(m["segundos"], 1)} s</span>{via}</div>""")
 
 
 # ---------- Assistente ----------
@@ -295,7 +308,7 @@ if secao == "Assistente":
                         "papel": "model", "texto": r.texto,
                         "previsto": prev.mediana * fator, "p10": prev.p10 * fator, "p90": prev.p90 * fator,
                         "real": r.resposta_tokens, "raciocinio": r.raciocinio_tokens, "entrada": r.prompt_tokens,
-                        "segundos": r.segundos,
+                        "segundos": r.segundos, "modelo": r.modelo,
                         "custo": (r.prompt_tokens * PRECO_IN + (r.resposta_tokens + r.raciocinio_tokens) * PRECO_OUT) / 1e6,
                     }
                     conversa.append(resp)
