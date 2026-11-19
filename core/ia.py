@@ -18,6 +18,8 @@ class RespostaIA:
 
 
 def _cliente(chave: str):
+    # O chamador precisa guardar o cliente numa variável: se ele for descartado,
+    # a biblioteca fecha a conexão antes da requisição sair.
     from google import genai
     return genai.Client(api_key=chave)
 
@@ -26,7 +28,8 @@ def gerar(prompt: str, chave: str, modelo: str, max_saida: int | None = None) ->
     from google.genai import types
     config = types.GenerateContentConfig(max_output_tokens=max_saida) if max_saida else None
     inicio = time.perf_counter()
-    r = _cliente(chave).models.generate_content(model=modelo, contents=prompt, config=config)
+    cliente = _cliente(chave)
+    r = cliente.models.generate_content(model=modelo, contents=prompt, config=config)
     uso = r.usage_metadata
     return RespostaIA(
         texto=r.text or "",
@@ -45,5 +48,6 @@ def fator_calibracao(chave: str, modelo: str) -> float:
     """
     amostra = pd.read_csv(DADOS / "amostra_calibracao.csv")
     texto = "\n\n".join(amostra.text)
-    r = _cliente(chave).models.count_tokens(model=modelo, contents=texto)
+    cliente = _cliente(chave)
+    r = cliente.models.count_tokens(model=modelo, contents=texto)
     return r.total_tokens / amostra.tokens.sum()

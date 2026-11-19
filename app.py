@@ -122,7 +122,7 @@ if chave:
     try:
         fator, calibrado = calibrar(chave, nome_modelo), True
     except Exception as e:
-        st.sidebar.warning(f"Não consegui calibrar com o Gemini ({type(e).__name__}). Usando a unidade o200k.")
+        st.sidebar.warning(f"Não consegui calibrar com o Gemini: {str(e)[:160]}. Usando a unidade o200k.")
 
 # ---------- Hero ----------
 st.html("""
