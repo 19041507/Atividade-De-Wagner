@@ -15,6 +15,16 @@ st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", init
 ROXO, VERDE, CINZA, ROSA = "#6D28D9", "#10B981", "#94A3B8", "#F43F5E"
 INSTRUCAO = ("Você é um assistente prestativo e direto. Responda em português do Brasil, "
              "com clareza, usando listas ou exemplos quando ajudarem.")
+SUGESTOES = [
+    "Explique juros compostos com um exemplo",
+    "Monte um roteiro de estudos de Python em 4 semanas",
+    "Quais as diferenças entre IA, machine learning e deep learning?",
+]
+
+
+def escolher_sugestao():
+    st.session_state.pendente = st.session_state.sugestao
+    st.session_state.sugestao = None
 
 
 def config(nome, padrao):
@@ -36,21 +46,24 @@ st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 html, body, [class*="css"], .stMarkdown, button, input, textarea { font-family: 'Inter', sans-serif !important; }
-.block-container { padding-top: 2rem; max-width: 1180px; }
+.block-container { padding-top: 4.2rem; padding-bottom: 3rem; max-width: 1080px; }
+header[data-testid="stHeader"] { background: transparent; }
 section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] { display: none; }
 @keyframes sobe { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes brilho { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 @keyframes pulso { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-.topo { display:flex; align-items:center; justify-content:space-between; margin-bottom: 1.6rem; animation: sobe .5s ease both; }
+.topo { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  margin-bottom: 2.2rem; animation: sobe .5s ease both; }
 .marca { font-weight:800; font-size:1.15rem; letter-spacing:-.01em; color:#0F172A; }
 .marca span { color:#6D28D9; }
 .status { font-size:.8rem; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4; padding:.35rem .75rem; border-radius:999px; }
 .status i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.45rem; vertical-align:middle; animation: pulso 2s infinite; }
-.hero { animation: sobe .7s ease both; margin-bottom: 1.2rem; }
-.hero h1 { font-size: 2.5rem; font-weight: 800; line-height:1.1; margin:0 0 .5rem; letter-spacing:-.02em;
+.hero { animation: sobe .7s ease both; margin-bottom: 1.8rem; }
+.hero h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 800; line-height:1.1; margin:0 0 .6rem; letter-spacing:-.03em;
+  padding-bottom:.1em;
   background: linear-gradient(90deg,#1E1B4B,#6D28D9,#10B981,#6D28D9); background-size:300% 100%;
   -webkit-background-clip:text; background-clip:text; color:transparent; animation: brilho 12s ease infinite; }
-.hero p { color:#475569; font-size:1.02rem; max-width: 760px; margin:0; }
+.hero p { color:#64748B; font-size:1rem; line-height:1.6; max-width: 680px; margin:0; }
 .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: .4rem 0 1.2rem; }
 .card { background:#fff; border:1px solid #EEF0F4; border-radius:16px; padding:18px 20px;
   box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .25s ease, box-shadow .25s ease, border-color .25s;
@@ -68,12 +81,24 @@ section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] {
   padding:.2rem .6rem; border-radius:999px; }
 .chip b { color:#0F172A; } .chip.ok { background:#ECFDF5; border-color:#D1FAE5; color:#047857; }
 .chip.fora { background:#FFF1F2; border-color:#FFE4E6; color:#BE123C; }
-.vazio { text-align:center; color:#64748B; padding:2.2rem 1rem; border:1px dashed #E2E8F0; border-radius:16px; animation: sobe .6s ease both; }
-.vazio b { color:#0F172A; display:block; font-size:1.05rem; margin-bottom:.3rem; }
-.stTabs [data-baseweb="tab-list"] { gap: 6px; }
-.stTabs [data-baseweb="tab"] { border-radius: 10px; padding: 8px 16px; transition: background .2s; }
-.stTabs [data-baseweb="tab"]:hover { background:#F3EEFF; }
-div[data-testid="stChatMessage"] { animation: sobe .4s ease both; border-radius:16px; }
+.vazio { text-align:center; color:#64748B; padding:1.8rem 1rem 1.2rem; animation: sobe .6s ease both; }
+.vazio .icone { width:44px; height:44px; margin:0 auto .8rem; border-radius:14px; display:flex; align-items:center;
+  justify-content:center; font-size:1.3rem; color:#fff; background:linear-gradient(135deg,#7C3AED,#10B981);
+  box-shadow:0 10px 24px -10px rgba(109,40,217,.6); }
+.vazio b { color:#0F172A; display:block; font-size:1.1rem; margin-bottom:.25rem; }
+.stTabs [data-baseweb="tab-list"] { gap: 4px; background:#F5F3FA; padding:4px; border-radius:14px; width:fit-content; max-width:100%; overflow-x:auto; }
+.stTabs [data-baseweb="tab"] { border-radius: 10px; padding: 8px 16px; height:auto; color:#475569; transition: background .2s, color .2s; }
+.stTabs [data-baseweb="tab"]:hover { color:#6D28D9; }
+.stTabs [aria-selected="true"] { background:#fff; color:#6D28D9; box-shadow:0 1px 3px rgba(15,23,42,.08); }
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display:none; }
+.stTabs [data-baseweb="tab-panel"] { padding-top: 1.6rem; }
+div[data-testid="stChatMessage"] { animation: sobe .4s ease both; border-radius:16px; padding:14px 16px; margin-bottom:.6rem;
+  background:#FFFFFF; border:1px solid #EEF0F4; }
+div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background:#F8FAFC; border-color:#F1F5F9; }
+div[data-testid="stChatInput"] { border-radius:16px; box-shadow:0 8px 30px -12px rgba(15,23,42,.18); }
+div[data-testid="stPills"] { display:flex; justify-content:center; }
+div[data-testid="stPills"] button { border-radius:999px; transition: transform .2s, border-color .2s; }
+div[data-testid="stPills"] button:hover { transform: translateY(-1px); border-color:#C4B5FD; color:#6D28D9; }
 textarea { border-radius:12px !important; }
 footer { visibility:hidden; }
 </style>
@@ -150,7 +175,9 @@ st.html(f"""
 </div>
 """)
 
-aba_chat, aba_painel, aba_algo, aba_sobre = st.tabs(["Assistente", "Painel de consumo", "O algoritmo", "Sobre"])
+aba_chat, aba_painel, aba_algo, aba_sobre = st.tabs([
+    ":material/chat_bubble: Assistente", ":material/monitoring: Painel de consumo",
+    ":material/model_training: O algoritmo", ":material/info: Sobre"])
 
 
 def recibo(m):
@@ -171,11 +198,13 @@ with aba_chat:
     elif not CHAVE:
         st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
 
-    caixa = st.container(height=520, border=False)
+    caixa = st.container()
     with caixa:
         if not st.session_state.conversa:
-            st.html('<div class="vazio"><b>Pergunte qualquer coisa</b>'
-                    'Ex.: "Explique juros compostos com um exemplo" ou "Monte um roteiro de estudos de Python".</div>')
+            st.html('<div class="vazio"><div class="icone">✦</div><b>Pergunte qualquer coisa</b>'
+                    'Cada resposta vem com a previsão de tokens, o consumo real e o custo.</div>')
+            st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
+                     label_visibility="collapsed", disabled=not online)
         for m in st.session_state.conversa:
             with st.chat_message("user" if m["papel"] == "user" else "assistant",
                                  avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
@@ -187,11 +216,11 @@ with aba_chat:
     bloqueado = not online or restante <= 0 or reg["chamadas_dia"] >= LIMITE_DIA
     pergunta = st.chat_input(
         "Escreva sua mensagem…" if restante > 0 else "Limite de mensagens desta sessão atingido",
-        disabled=bloqueado)
+        disabled=bloqueado) or st.session_state.pop("pendente", None)
     st.caption(f"{restante} mensagens restantes nesta sessão · preço de tabela: "
                f"US$ {br(PRECO_IN, 2)} (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens")
 
-    if pergunta:
+    if pergunta and not bloqueado:
         conversa = st.session_state.conversa
         prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
         conversa.append({"papel": "user", "texto": pergunta})
@@ -232,7 +261,7 @@ with aba_chat:
 with aba_painel:
     ev = pd.DataFrame(reg["eventos"])
     if ev.empty:
-        st.html('<div class="vazio"><b>Ainda não há uso registrado</b>'
+        st.html('<div class="vazio"><div class="icone">◔</div><b>Ainda não há uso registrado</b>'
                 'Converse com o assistente: cada resposta entra aqui com os tokens e o custo reais.</div>')
     else:
         saida = ev.real + ev.raciocinio
