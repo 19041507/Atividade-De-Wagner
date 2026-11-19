@@ -1,4 +1,6 @@
 import os
+import threading
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -6,48 +8,72 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import ia
-from core.modelo import IDIOMAS, NOMES_IDIOMAS, ModeloTokens
+from core.modelo import NOMES_IDIOMAS, ModeloTokens
 
-st.set_page_config(page_title="TokenScope · Custo de IA", page_icon="◆", layout="wide")
+st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
 
 ROXO, VERDE, CINZA, ROSA = "#6D28D9", "#10B981", "#94A3B8", "#F43F5E"
-LIMITE_CHAMADAS = 20  # por sessão, quando a chave é a do servidor
+INSTRUCAO = ("Você é um assistente prestativo e direto. Responda em português do Brasil, "
+             "com clareza, usando listas ou exemplos quando ajudarem.")
+
+
+def config(nome, padrao):
+    try:
+        v = st.secrets.get(nome)
+    except Exception:
+        v = None
+    return v if v is not None else os.environ.get(nome, padrao)
+
+
+CHAVE = config("GEMINI_API_KEY", None)
+MODELO_IA = config("GEMINI_MODEL", "gemini-2.5-flash")
+PRECO_IN = float(config("PRECO_ENTRADA", 0.30))   # US$ por 1M tokens
+PRECO_OUT = float(config("PRECO_SAIDA", 2.50))    # US$ por 1M tokens (inclui raciocínio)
+LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))
+LIMITE_DIA = int(config("LIMITE_DIA", 300))
 
 st.html("""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 html, body, [class*="css"], .stMarkdown, button, input, textarea { font-family: 'Inter', sans-serif !important; }
-.block-container { padding-top: 2.2rem; max-width: 1200px; }
-@keyframes sobe { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.block-container { padding-top: 2rem; max-width: 1180px; }
+section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] { display: none; }
+@keyframes sobe { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes brilho { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-.hero { animation: sobe .7s ease both; margin-bottom: 1.4rem; }
-.hero .selo { display:inline-block; font-size:.75rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
-  color:#6D28D9; background:#F3EEFF; border:1px solid #E4D9FF; padding:.3rem .7rem; border-radius:999px; }
-.hero h1 { font-size: 2.7rem; font-weight: 800; line-height:1.1; margin:.8rem 0 .5rem; letter-spacing:-.02em;
+@keyframes pulso { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.topo { display:flex; align-items:center; justify-content:space-between; margin-bottom: 1.6rem; animation: sobe .5s ease both; }
+.marca { font-weight:800; font-size:1.15rem; letter-spacing:-.01em; color:#0F172A; }
+.marca span { color:#6D28D9; }
+.status { font-size:.8rem; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4; padding:.35rem .75rem; border-radius:999px; }
+.status i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.45rem; vertical-align:middle; animation: pulso 2s infinite; }
+.hero { animation: sobe .7s ease both; margin-bottom: 1.2rem; }
+.hero h1 { font-size: 2.5rem; font-weight: 800; line-height:1.1; margin:0 0 .5rem; letter-spacing:-.02em;
   background: linear-gradient(90deg,#1E1B4B,#6D28D9,#10B981,#6D28D9); background-size:300% 100%;
   -webkit-background-clip:text; background-clip:text; color:transparent; animation: brilho 12s ease infinite; }
-.hero p { color:#475569; font-size:1.05rem; max-width: 760px; }
-.cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: .4rem 0 1.2rem; }
+.hero p { color:#475569; font-size:1.02rem; max-width: 760px; margin:0; }
+.cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: .4rem 0 1.2rem; }
 .card { background:#fff; border:1px solid #EEF0F4; border-radius:16px; padding:18px 20px;
   box-shadow: 0 1px 2px rgba(15,23,42,.04); transition: transform .25s ease, box-shadow .25s ease, border-color .25s;
   animation: sobe .6s ease both; }
 .card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -12px rgba(109,40,217,.25); border-color:#E4D9FF; }
-.card .rot { font-size:.78rem; color:#64748B; font-weight:500; text-transform:uppercase; letter-spacing:.05em; }
-.card .val { font-size:1.75rem; font-weight:700; color:#0F172A; margin-top:.25rem; letter-spacing:-.01em; }
+.card .rot { font-size:.76rem; color:#64748B; font-weight:500; text-transform:uppercase; letter-spacing:.05em; }
+.card .val { font-size:1.7rem; font-weight:700; color:#0F172A; margin-top:.25rem; letter-spacing:-.01em; }
 .card .dica { font-size:.82rem; color:#94A3B8; margin-top:.2rem; }
 .card.destaque { background: linear-gradient(135deg,#6D28D9,#4C1D95); border:none; }
 .card.destaque .rot, .card.destaque .dica { color:#DDD6FE; } .card.destaque .val { color:#fff; }
 .nota { background:#F8FAFC; border-left:3px solid #6D28D9; padding:.8rem 1rem; border-radius:8px; color:#334155;
   font-size:.92rem; animation: sobe .6s ease both; }
-.tag { display:inline-block; padding:.15rem .55rem; border-radius:999px; font-size:.78rem; font-weight:600; }
-.tag.ok { background:#ECFDF5; color:#047857; } .tag.fora { background:#FFF1F2; color:#BE123C; }
-section[data-testid="stSidebar"] { background:#FBFAFF; border-right:1px solid #EEF0F4; }
+.recibo { display:flex; flex-wrap:wrap; gap:6px; margin-top:.6rem; animation: sobe .5s ease both; }
+.chip { font-size:.74rem; font-weight:500; color:#475569; background:#F8FAFC; border:1px solid #EEF0F4;
+  padding:.2rem .6rem; border-radius:999px; }
+.chip b { color:#0F172A; } .chip.ok { background:#ECFDF5; border-color:#D1FAE5; color:#047857; }
+.chip.fora { background:#FFF1F2; border-color:#FFE4E6; color:#BE123C; }
+.vazio { text-align:center; color:#64748B; padding:2.2rem 1rem; border:1px dashed #E2E8F0; border-radius:16px; animation: sobe .6s ease both; }
+.vazio b { color:#0F172A; display:block; font-size:1.05rem; margin-bottom:.3rem; }
 .stTabs [data-baseweb="tab-list"] { gap: 6px; }
 .stTabs [data-baseweb="tab"] { border-radius: 10px; padding: 8px 16px; transition: background .2s; }
 .stTabs [data-baseweb="tab"]:hover { background:#F3EEFF; }
-div[data-testid="stButton"] button[kind="primary"] { border-radius:12px; padding:.6rem 1.2rem; font-weight:600;
-  background: linear-gradient(135deg,#7C3AED,#6D28D9); border:none; transition: transform .2s, box-shadow .2s; }
-div[data-testid="stButton"] button[kind="primary"]:hover { transform: translateY(-1px); box-shadow:0 8px 20px -8px rgba(109,40,217,.6); }
+div[data-testid="stChatMessage"] { animation: sobe .4s ease both; border-radius:16px; }
 textarea { border-radius:12px !important; }
 footer { visibility:hidden; }
 </style>
@@ -74,251 +100,228 @@ def grafico(fig, altura=360):
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
+def br(v, casas=0):
+    return f"{v:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def usd(v):
-    return f"US$ {v:,.4f}" if v < 1 else f"US$ {v:,.2f}"
+    return f"US$ {br(v, 5 if v < 0.01 else 4 if v < 1 else 2)}"
 
 
-@st.cache_resource(show_spinner="Treinando o modelo com 18.924 conversas reais…")
+@st.cache_resource(show_spinner="Carregando o modelo treinado com 18.924 conversas reais…")
 def carregar_modelo():
     return ModeloTokens()
 
 
-@st.cache_data(show_spinner="Calibrando com o contador de tokens do Gemini…")
+@st.cache_resource
+def registro():
+    """Uso de todos os visitantes, guardado enquanto o servidor estiver no ar."""
+    return {"trava": threading.Lock(), "eventos": [], "dia": date.today(), "chamadas_dia": 0}
+
+
+@st.cache_data(show_spinner=False)
 def calibrar(_chave, modelo):
     return ia.fator_calibracao(_chave, modelo)
 
 
-def segredo(nome):
-    try:
-        return st.secrets.get(nome) or os.environ.get(nome)
-    except Exception:
-        return os.environ.get(nome)
-
-
 modelo = carregar_modelo()
-st.session_state.setdefault("historico", [])
-st.session_state.setdefault("chamadas", 0)
+reg = registro()
+st.session_state.setdefault("conversa", [])
+st.session_state.setdefault("enviadas", 0)
 
-# ---------- Barra lateral ----------
-with st.sidebar:
-    st.markdown("### ◆ TokenScope")
-    st.caption("Configuração da simulação")
-    chave_servidor = segredo("GEMINI_API_KEY")
-    chave_propria = st.text_input("Sua API key do Gemini (opcional)", type="password",
-                                  help="Se vazio, usa a chave configurada no servidor, com limite de chamadas por sessão.")
-    chave = chave_propria or chave_servidor
-    nome_modelo = st.text_input("Modelo do Gemini", value=segredo("GEMINI_MODEL") or "gemini-2.5-flash")
-    idioma = st.selectbox("Idioma dos usuários", IDIOMAS, index=IDIOMAS.index("pt-BR"),
-                          format_func=lambda l: NOMES_IDIOMAS[l])
-    req_mes = st.slider("Requisições por mês", 1_000, 200_000, 10_000, step=1_000)
-    st.markdown("**Preço do modelo** (US$ por 1M tokens)")
-    c1, c2 = st.columns(2)
-    preco_in = c1.number_input("Entrada", 0.0, 100.0, 0.30, step=0.05, format="%.2f")
-    preco_out = c2.number_input("Saída", 0.0, 200.0, 2.50, step=0.10, format="%.2f")
-    st.caption("Valores de exemplo: confira a tabela de preços do modelo escolhido.")
-
-fator, calibrado = 1.0, False
-if chave:
+fator, erro_calibracao = 1.0, None
+if CHAVE:
     try:
-        fator, calibrado = calibrar(chave, nome_modelo), True
+        fator = calibrar(CHAVE, MODELO_IA)
     except Exception as e:
-        st.sidebar.warning(f"Não consegui calibrar com o Gemini: {str(e)[:160]}. Usando a unidade o200k.")
+        erro_calibracao = str(e)[:200]
 
-# ---------- Hero ----------
-st.html("""
+online = bool(CHAVE) and erro_calibracao is None
+st.html(f"""
+<div class="topo">
+  <div class="marca">◆ Token<span>Scope</span></div>
+  <div class="status"><i style="background:{VERDE if online else ROSA}"></i>
+  {f"{MODELO_IA} conectado" if online else "IA indisponível"}</div>
+</div>
 <div class="hero">
-  <span class="selo">IA aplicada · IA experimental</span>
-  <h1>Quanto custa a IA<br>da sua aplicação?</h1>
-  <p>Cole o prompt que a sua aplicação vai enviar. Um modelo treinado com <b>18.924 conversas reais</b>
-  prevê quantos tokens a IA vai gerar e quanto isso custa por mês. Depois, executamos no <b>Gemini</b>
-  e comparamos a previsão com o consumo real.</p>
+  <h1>Use IA. Veja quanto ela custa.</h1>
+  <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com <b>18.924 conversas reais</b>
+  prevê quantos tokens a IA vai gerar. Depois, mostramos o consumo real e o custo, e o painel acumula o uso de todos.</p>
 </div>
 """)
 
-aba_sim, aba_vivo, aba_dados, aba_valid, aba_sobre = st.tabs(
-    ["Simulador", "Ao vivo com Gemini", "Os dados", "O modelo é válido?", "Sobre o projeto"])
+aba_chat, aba_painel, aba_algo, aba_sobre = st.tabs(["Assistente", "Painel de consumo", "O algoritmo", "Sobre"])
 
-# ---------- Simulador ----------
-with aba_sim:
-    esq, dir_ = st.columns([1.35, 1], gap="large")
-    with esq:
-        prompt = st.text_area(
-            "Prompt da sua aplicação",
-            value="Explique de forma simples o que é inflação e dê dois exemplos do dia a dia.",
-            height=170,
-        )
-        continuacao = st.toggle("É continuação de uma conversa", value=False)
-    prev = modelo.prever(prompt, idioma, continuacao)
-    ent_tok = prev.prompt_tokens * fator
-    sai_tok = prev.media * fator
-    custo_req = (ent_tok * preco_in + sai_tok * preco_out) / 1e6
-    with dir_:
-        unidade = "tokens do Gemini" if calibrado else "tokens (o200k)"
-        aviso = "" if calibrado else "<br><br>Sem chave do Gemini, os valores estão na unidade do tokenizador o200k."
-        st.html(f"""
-        <div class="nota" style="margin-top:1.8rem">A resposta deve ter entre <b>{prev.p10 * fator:,.0f}</b> e
-        <b>{prev.p90 * fator:,.0f}</b> {unidade} (faixa de 80%), com mediana de <b>{prev.mediana * fator:,.0f}</b>.{aviso}</div>""")
 
-    cards([
-        ("Tokens de entrada", f"{ent_tok:,.0f}", "o que a aplicação envia", False),
-        ("Saída prevista", f"{sai_tok:,.0f}", f"faixa {prev.p10 * fator:,.0f} – {prev.p90 * fator:,.0f}", False),
-        ("Custo por requisição", usd(custo_req), "entrada + saída", False),
-        ("Custo por mês", usd(custo_req * req_mes), f"{req_mes:,} requisições", True),
-    ])
+def recibo(m):
+    dentro = m["p10"] <= m["real"] <= m["p90"]
+    rac = f'<span class="chip">raciocínio <b>{br(m["raciocinio"])}</b></span>' if m["raciocinio"] else ""
+    st.html(f"""<div class="recibo">
+      <span class="chip">previsto <b>~{br(m["previsto"])}</b> ({br(m["p10"])}–{br(m["p90"])})</span>
+      <span class="chip {"ok" if dentro else "fora"}">real <b>{br(m["real"])}</b> tokens</span>{rac}
+      <span class="chip">entrada <b>{br(m["entrada"])}</b></span>
+      <span class="chip">custo <b>{usd(m["custo"])}</b></span>
+      <span class="chip">{br(m["segundos"], 1)} s</span></div>""")
 
-    g1, g2 = st.columns(2, gap="large")
-    with g1:
-        st.markdown("##### Para onde vai o dinheiro")
-        fig = go.Figure(go.Pie(
-            labels=["Entrada (prompt)", "Saída (resposta)"],
-            values=[ent_tok * preco_in, sai_tok * preco_out], hole=.68,
-            marker=dict(colors=[CINZA, ROXO]), textinfo="percent", sort=False))
-        grafico(fig, 320)
-    with g2:
-        st.markdown("##### Quanto economizo limitando a resposta?")
-        limites = [64, 128, 192, 256, 384, 512, 768, 1024]
-        eco = np.array([modelo.economia_com_limite(l) for l in limites])
-        fig = go.Figure()
-        fig.add_bar(x=[str(l) for l in limites], y=eco[:, 0] * 100, name="economia na saída",
-                    marker_color=VERDE, hovertemplate="%{y:.0f}%<extra></extra>")
-        fig.add_scatter(x=[str(l) for l in limites], y=eco[:, 1] * 100, name="respostas cortadas",
-                        mode="lines+markers", line=dict(color=ROSA, width=2), hovertemplate="%{y:.0f}%<extra></extra>")
-        fig.update_layout(xaxis_title="limite de tokens da resposta (max_output_tokens)", yaxis_title="%")
-        grafico(fig, 320)
-    st.caption("A curva usa o tamanho real das respostas da base: limitar economiza, mas corta respostas. "
-               "O ponto de equilíbrio é onde a economia ainda é alta e poucas respostas são cortadas.")
 
-# ---------- Ao vivo ----------
-with aba_vivo:
-    st.markdown("#### Previsão × consumo real")
-    st.caption("Executa o prompt do Simulador no Gemini. A API informa os tokens realmente gastos, "
-               "e cada chamada entra no histórico abaixo para medir o acerto do modelo.")
-    usando_servidor = bool(chave) and not chave_propria
-    restante = LIMITE_CHAMADAS - st.session_state.chamadas
-    if not chave:
-        st.info("Informe uma API key do Gemini na barra lateral para executar ao vivo.")
-    else:
-        if usando_servidor:
-            st.caption(f"Chamadas restantes nesta sessão: {restante}")
-        if st.button("Executar no Gemini", type="primary", disabled=usando_servidor and restante <= 0):
-            try:
-                with st.spinner("Chamando o Gemini…"):
-                    r = ia.gerar(prompt, chave, nome_modelo)
-                st.session_state.chamadas += 1
-                st.session_state.historico.append({
-                    "prompt": prompt[:80] + ("…" if len(prompt) > 80 else ""),
-                    "previsto": prev.mediana * fator, "p10": prev.p10 * fator, "p90": prev.p90 * fator,
-                    "real": r.resposta_tokens, "raciocinio": r.raciocinio_tokens,
-                    "entrada": r.prompt_tokens, "segundos": r.segundos,
-                    "custo": (r.prompt_tokens * preco_in + (r.resposta_tokens + r.raciocinio_tokens) * preco_out) / 1e6,
-                })
-                st.session_state.ultima = r.texto
-            except Exception as e:
-                msg = str(e)
-                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    st.warning("Limite de uso do Gemini atingido. Aguarde um minuto e tente de novo.")
+# ---------- Assistente ----------
+with aba_chat:
+    if erro_calibracao:
+        st.warning(f"O Gemini recusou a conexão: {erro_calibracao}")
+    elif not CHAVE:
+        st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
+
+    caixa = st.container(height=520, border=False)
+    with caixa:
+        if not st.session_state.conversa:
+            st.html('<div class="vazio"><b>Pergunte qualquer coisa</b>'
+                    'Ex.: "Explique juros compostos com um exemplo" ou "Monte um roteiro de estudos de Python".</div>')
+        for m in st.session_state.conversa:
+            with st.chat_message("user" if m["papel"] == "user" else "assistant",
+                                 avatar=":material/person:" if m["papel"] == "user" else ":material/auto_awesome:"):
+                st.markdown(m["texto"])
+                if m["papel"] == "model":
+                    recibo(m)
+
+    restante = LIMITE_SESSAO - st.session_state.enviadas
+    bloqueado = not online or restante <= 0 or reg["chamadas_dia"] >= LIMITE_DIA
+    pergunta = st.chat_input(
+        "Escreva sua mensagem…" if restante > 0 else "Limite de mensagens desta sessão atingido",
+        disabled=bloqueado)
+    st.caption(f"{restante} mensagens restantes nesta sessão · preço de tabela: "
+               f"US$ {br(PRECO_IN, 2)} (entrada) e US$ {br(PRECO_OUT, 2)} (saída) por 1M tokens")
+
+    if pergunta:
+        conversa = st.session_state.conversa
+        prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
+        conversa.append({"papel": "user", "texto": pergunta})
+        with caixa:
+            with st.chat_message("user", avatar=":material/person:"):
+                st.markdown(pergunta)
+            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+                st.html(f'<div class="recibo"><span class="chip">previsão: <b>~{br(prev.mediana * fator)}</b> tokens '
+                        f'({br(prev.p10 * fator)}–{br(prev.p90 * fator)})</span></div>')
+                try:
+                    with st.spinner("Gerando resposta…"):
+                        with reg["trava"]:
+                            if reg["dia"] != date.today():
+                                reg["dia"], reg["chamadas_dia"] = date.today(), 0
+                            reg["chamadas_dia"] += 1
+                        r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO)
+                except Exception as e:
+                    conversa.pop()
+                    msg = str(e)
+                    st.warning("O Gemini está no limite de uso agora. Tente de novo em um minuto."
+                               if "429" in msg or "RESOURCE_EXHAUSTED" in msg else f"Erro ao chamar o Gemini: {msg[:200]}")
                 else:
-                    st.error(f"Erro ao chamar o Gemini: {type(e).__name__}: {msg[:200]}")
+                    st.session_state.enviadas += 1
+                    resp = {
+                        "papel": "model", "texto": r.texto,
+                        "previsto": prev.mediana * fator, "p10": prev.p10 * fator, "p90": prev.p90 * fator,
+                        "real": r.resposta_tokens, "raciocinio": r.raciocinio_tokens, "entrada": r.prompt_tokens,
+                        "segundos": r.segundos,
+                        "custo": (r.prompt_tokens * PRECO_IN + (r.resposta_tokens + r.raciocinio_tokens) * PRECO_OUT) / 1e6,
+                    }
+                    conversa.append(resp)
+                    with reg["trava"]:
+                        reg["eventos"].append({**{k: v for k, v in resp.items() if k not in ("papel", "texto")},
+                                               "quando": datetime.now()})
+                    st.rerun()
 
-    hist = pd.DataFrame(st.session_state.historico)
-    if hist.empty:
-        st.html('<div class="nota">Nenhuma execução ainda. Os resultados aparecem aqui.</div>')
+# ---------- Painel ----------
+with aba_painel:
+    ev = pd.DataFrame(reg["eventos"])
+    if ev.empty:
+        st.html('<div class="vazio"><b>Ainda não há uso registrado</b>'
+                'Converse com o assistente: cada resposta entra aqui com os tokens e o custo reais.</div>')
     else:
-        u = hist.iloc[-1]
-        dentro = u.p10 <= u.real <= u.p90
-        st.html(f'<span class="tag {"ok" if dentro else "fora"}">'
-                f'{"Dentro da faixa prevista" if dentro else "Fora da faixa prevista"}</span>')
+        saida = ev.real + ev.raciocinio
+        acerto = ((ev.real >= ev.p10) & (ev.real <= ev.p90)).mean()
         cards([
-            ("Previsto (última)", f"{u.previsto:,.0f}", f"faixa {u.p10:,.0f} – {u.p90:,.0f}", False),
-            ("Real (última)", f"{u.real:,.0f}",
-             f"+ {u.raciocinio:,.0f} de raciocínio" if u.raciocinio else "tokens de resposta", False),
-            ("Acerto da faixa", f"{100 * ((hist.real >= hist.p10) & (hist.real <= hist.p90)).mean():.0f}%",
-             f"em {len(hist)} execuções (meta ≈ 80%)", False),
-            ("Tokens de IA gastos", f"{int(hist.entrada.sum() + hist.real.sum() + hist.raciocinio.sum()):,}",
-             f"custo {usd(hist.custo.sum())}", True),
+            ("Respostas geradas", br(len(ev)), "por todos os visitantes", False),
+            ("Tokens consumidos", br(ev.entrada.sum() + saida.sum()),
+             f"{br(ev.entrada.sum())} entrada · {br(saida.sum())} saída", False),
+            ("Acerto da previsão", f"{br(100 * acerto)}%", "respostas dentro da faixa (meta ≈ 80%)", False),
+            ("Custo total", usd(ev.custo.sum()), f"média {usd(ev.custo.mean())} por resposta", True),
         ])
-        with st.expander("Resposta do Gemini"):
-            st.markdown(st.session_state.get("ultima", ""))
-        x = list(range(1, len(hist) + 1))
-        fig = go.Figure()
-        fig.add_scatter(x=x + x[::-1], y=list(hist.p90) + list(hist.p10[::-1]), fill="toself",
-                        fillcolor="rgba(109,40,217,.10)", line=dict(width=0), name="faixa prevista (80%)",
-                        hoverinfo="skip")
-        fig.add_scatter(x=x, y=hist.previsto, mode="lines+markers", name="previsto", line=dict(color=ROXO, dash="dot"))
-        fig.add_scatter(x=x, y=hist.real, mode="lines+markers", name="real (Gemini)", line=dict(color=VERDE, width=3))
-        fig.update_layout(xaxis_title="execução", yaxis_title="tokens da resposta")
-        grafico(fig)
-        st.dataframe(hist.drop(columns=["p10", "p90"]).round(2), hide_index=True, width="stretch")
+        g1, g2 = st.columns([1.6, 1], gap="large")
+        with g1:
+            st.markdown("##### Previsto × real, resposta a resposta")
+            x = list(range(1, len(ev) + 1))
+            fig = go.Figure()
+            fig.add_scatter(x=x + x[::-1], y=list(ev.p90) + list(ev.p10[::-1]), fill="toself",
+                            fillcolor="rgba(109,40,217,.10)", line=dict(width=0), name="faixa prevista (80%)",
+                            hoverinfo="skip")
+            fig.add_scatter(x=x, y=ev.previsto, mode="lines+markers", name="previsto",
+                            line=dict(color=ROXO, dash="dot"))
+            fig.add_scatter(x=x, y=ev.real, mode="lines+markers", name="real", line=dict(color=VERDE, width=3))
+            fig.update_layout(xaxis_title="resposta", yaxis_title="tokens da resposta")
+            grafico(fig)
+        with g2:
+            st.markdown("##### Para onde vai o dinheiro")
+            fig = go.Figure(go.Pie(
+                labels=["Entrada", "Resposta", "Raciocínio"],
+                values=[ev.entrada.sum() * PRECO_IN, ev.real.sum() * PRECO_OUT, ev.raciocinio.sum() * PRECO_OUT],
+                hole=.68, marker=dict(colors=[CINZA, ROXO, "#A78BFA"]), textinfo="percent", sort=False))
+            grafico(fig)
+        st.html(f'<div class="nota">No ritmo atual, <b>10.000 respostas</b> custariam cerca de '
+                f'<b>{usd(ev.custo.mean() * 10_000)}</b>. O dado é real: vem dos tokens que o próprio Gemini informou '
+                f'em cada chamada.</div>')
 
-# ---------- Dados ----------
-with aba_dados:
+# ---------- O algoritmo ----------
+with aba_algo:
     p = modelo.pares
+    m = modelo.metricas.set_index("modelo")
+    gb = m.loc["Gradient Boosting"]
+    real, previsto = modelo.custo_mensal(10_000, PRECO_IN, PRECO_OUT)
+    erro_mes = 100 * np.median(np.abs(previsto - real) / real)
+    st.markdown("#### Como a previsão é feita")
+    st.caption("Base pública OpenAssistant (oasst1): 18.924 pares de pergunta → resposta reais. "
+               "Família: aprendizado supervisionado (regressão). Validação em 25% dos dados que o modelo não viu.")
     cards([
-        ("Conversas analisadas", f"{len(p):,}", "pares prompt → resposta", False),
-        ("Mediana do prompt", f"{p.prompt_tokens.median():,.0f}", "tokens", False),
-        ("Mediana da resposta", f"{p.resp_tokens.median():,.0f}", "tokens", False),
-        ("Resposta / prompt", f"{p.resp_tokens.median() / p.prompt_tokens.median():.1f}×", "a saída domina", True),
+        ("Conversas na base", br(len(p)), "pares pergunta → resposta", False),
+        ("Erro médio", f"{br(gb.mae)} tokens", f"chute ingênuo: {br(m.loc['Baseline (mediana)'].mae)}", False),
+        ("Acerto da faixa 80%", f"{br(100 * modelo.cobertura_faixa)}%", "no conjunto de teste", False),
+        ("Erro no custo do mês", f"{br(erro_mes, 1)}%", "10.000 respostas (Monte Carlo)", True),
     ])
     g1, g2 = st.columns(2, gap="large")
     with g1:
-        st.markdown("##### Distribuição de tokens")
+        st.markdown("##### Distribuição de tokens na base")
         bins = np.logspace(0, 3.8, 45)
         fig = go.Figure()
-        for col, nome, cor in [("prompt_tokens", "prompt", CINZA), ("resp_tokens", "resposta", ROXO)]:
+        for col, nome, cor in [("prompt_tokens", "pergunta", CINZA), ("resp_tokens", "resposta", ROXO)]:
             h, e = np.histogram(p[col], bins=bins)
             fig.add_bar(x=np.sqrt(e[:-1] * e[1:]), y=h, name=nome, marker_color=cor, opacity=.8)
         fig.update_layout(barmode="overlay", xaxis_type="log", xaxis_title="tokens (escala log)", yaxis_title="conversas")
         grafico(fig)
     with g2:
+        st.markdown("##### Erro por resposta (menor é melhor)")
+        fig = go.Figure(go.Bar(x=m.index, y=m.mae, marker_color=[CINZA, "#A78BFA", ROXO],
+                               text=[br(v) for v in m.mae], textposition="outside"))
+        fig.update_layout(yaxis_title="erro médio absoluto (tokens)")
+        grafico(fig)
+    g3, g4 = st.columns(2, gap="large")
+    with g3:
         st.markdown("##### O idioma muda o custo")
         d = modelo.idiomas.sort_values("tokens_por_1000_caracteres")
         fig = go.Figure(go.Bar(
             x=d.tokens_por_1000_caracteres, y=[NOMES_IDIOMAS[l] for l in d.lang], orientation="h",
-            marker_color=[ROXO if l == idioma else "#C4B5FD" for l in d.lang],
+            marker_color=[ROXO if l == "pt-BR" else "#C4B5FD" for l in d.lang],
             hovertemplate="%{x:.0f} tokens<extra></extra>"))
         fig.update_layout(xaxis_title="tokens a cada 1.000 caracteres")
         grafico(fig)
-    st.markdown("##### Prompt × resposta")
-    a = p.sample(4000, random_state=0)
-    corr = np.corrcoef(np.log1p(p.prompt_tokens), np.log1p(p.resp_tokens))[0, 1]
-    fig = go.Figure(go.Scattergl(x=a.prompt_tokens, y=a.resp_tokens, mode="markers",
-                                 marker=dict(size=4, color=ROXO, opacity=.25)))
-    fig.update_layout(xaxis_type="log", yaxis_type="log", xaxis_title="tokens do prompt", yaxis_title="tokens da resposta",
-                      title=dict(text=f"correlação (log) = {corr:.2f}: existe, mas é fraca", font=dict(size=13)))
-    grafico(fig, 380)
-    st.caption("Fonte: OpenAssistant Conversations (oasst1), Apache 2.0. Tokens contados com o tokenizador público o200k_base.")
-
-# ---------- Validação ----------
-with aba_valid:
-    m = modelo.metricas.set_index("modelo")
-    gb = m.loc["Gradient Boosting"]
-    real, previsto = modelo.custo_mensal(req_mes, preco_in, preco_out)
-    erro_mes = 100 * np.median(np.abs(previsto - real) / real)
-    cards([
-        ("R² do modelo", f"{gb.r2:.2f}", "por resposta (escala log)", False),
-        ("Erro médio", f"{gb.mae:.0f} tokens", f"baseline: {m.loc['Baseline (mediana)'].mae:.0f}", False),
-        ("Acerto da faixa 80%", f"{100 * modelo.cobertura_faixa:.0f}%", "no conjunto de teste", False),
-        ("Erro no custo do mês", f"{erro_mes:.1f}%", f"{req_mes:,} requisições", True),
-    ])
-    g1, g2 = st.columns(2, gap="large")
-    with g1:
-        st.markdown("##### Erro por resposta (menor é melhor)")
-        fig = go.Figure(go.Bar(x=m.index, y=m.mae, marker_color=[CINZA, "#A78BFA", ROXO],
-                               text=[f"{v:.0f}" for v in m.mae], textposition="outside"))
-        fig.update_layout(yaxis_title="erro médio absoluto (tokens)")
-        grafico(fig)
-    with g2:
-        st.markdown("##### Custo mensal: previsto × real")
+    with g4:
+        st.markdown("##### Custo de 10.000 respostas: previsto × real")
         fig = go.Figure()
         fig.add_histogram(x=real, name="real", marker_color=CINZA, opacity=.75, nbinsx=50)
         fig.add_histogram(x=previsto, name="previsto", marker_color=ROXO, opacity=.75, nbinsx=50)
-        fig.update_layout(barmode="overlay", xaxis_title="US$ por mês", yaxis_title="simulações (Monte Carlo)")
+        fig.update_layout(barmode="overlay", xaxis_title="US$", yaxis_title="simulações")
         grafico(fig)
     st.html(f"""
-    <div class="nota"><b>Leitura honesta.</b> Prever o tamanho de <i>uma</i> resposta é difícil: o modelo explica
-    ~{100 * gb.r2:.0f}% da variação e bate o baseline por pouco. Mas a aplicação paga milhares de respostas, e na soma
-    os erros se compensam: o custo do mês fica a ~{erro_mes:.0f}% do real. A faixa de 80% acerta
-    {100 * modelo.cobertura_faixa:.0f}% das vezes no teste. Na aba <b>Ao vivo</b>, a mesma métrica é medida contra o Gemini.</div>""")
+    <div class="nota"><b>O que os dados mostram.</b> Prever o tamanho de <i>uma</i> resposta é difícil: o modelo explica
+    ~{br(100 * gb.r2)}% da variação e bate o chute ingênuo por pouco. Mas uma aplicação paga milhares de respostas, e na
+    soma os erros se compensam: o custo de 10.000 respostas fica a ~{br(erro_mes)}% do real. A faixa de 80% acerta
+    {br(100 * modelo.cobertura_faixa)}% das vezes no teste, e o <b>Painel de consumo</b> mede a mesma coisa contra o Gemini, ao vivo.</div>""")
 
 # ---------- Sobre ----------
 with aba_sobre:
@@ -326,31 +329,31 @@ with aba_sobre:
     with c1:
         st.markdown("""
 #### O problema
-Toda aplicação com IA generativa paga por **token**. A aplicação conhece o prompt que envia,
+Toda aplicação com IA generativa paga por **token**. Ela conhece a pergunta que envia,
 mas **não sabe o tamanho da resposta**, que é a parte mais cara. Sem isso, não dá para planejar o orçamento.
 
-#### A técnica
-**Inferir** os tokens da resposta a partir do prompt, **comparar** com uma referência ingênua e
-**avaliar o impacto** no custo mensal. Depois, **validar ao vivo** com os tokens reais que o Gemini informa.
+#### A solução
+O TokenScope usa a IA de verdade (Gemini) e, a cada resposta, **prevê** os tokens antes e **mede** o consumo real
+depois. O painel acumula o uso e mostra se a previsão acerta.
 
 #### A família de algoritmos
 - **Aprendizado supervisionado, regressão**: Gradient Boosting (previsão central) e regressão quantílica
-  (faixa de 80%), comparados com regressão linear e baseline.
-- **Simulação de Monte Carlo** (bootstrap) para o custo mensal.
+  (faixa de 80%), comparados com regressão linear e com um chute ingênuo.
+- **Simulação de Monte Carlo** para o custo de milhares de respostas.
 """)
     with c2:
-        st.markdown("""
+        st.markdown(f"""
 #### Os dados
 [OpenAssistant oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1): ~88 mil mensagens reais,
-18.924 pares prompt → melhor resposta, em vários idiomas. Licença Apache 2.0.
+18.924 pares pergunta → melhor resposta, em vários idiomas. Licença Apache 2.0.
 
-#### O token de IA
-A aplicação usa a **API do Gemini**: cada execução consome tokens reais, que são medidos e comparados com a previsão.
-Para comparar na mesma unidade, o app mede uma amostra da base com o contador de tokens do Gemini e calibra o modelo.
+#### Tokens de IA
+Cada mensagem gasta tokens reais do **{MODELO_IA}**, informados pela própria API. Para comparar previsão e
+consumo na mesma unidade, o app mede uma amostra da base com o contador de tokens do Gemini e calibra o modelo.
 
 #### Limitações
 - As respostas da base são de voluntários, não de um modelo comercial.
-- Modelos com raciocínio ("thinking") gastam tokens extras que não aparecem no texto. O app mostra esses tokens à parte.
-- Os preços são editáveis e mudam com o tempo.
+- Modelos com raciocínio gastam tokens extras que não aparecem no texto. Eles entram no custo, mas não na previsão.
+- O painel guarda o uso enquanto o servidor estiver no ar.
 """)
     st.caption("Atividade de IA aplicada e IA experimental, Prof. Wagner, 3º ciclo.")
