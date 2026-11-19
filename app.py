@@ -26,7 +26,7 @@ def config(nome, padrao):
 
 
 CHAVE = config("GEMINI_API_KEY", None)
-MODELO_IA = config("GEMINI_MODEL", "gemini-2.5-flash")
+MODELO_IA = config("GEMINI_MODEL", "gemini-3.8-flash")
 PRECO_IN = float(config("PRECO_ENTRADA", 0.30))   # US$ por 1M tokens
 PRECO_OUT = float(config("PRECO_SAIDA", 2.50))    # US$ por 1M tokens (inclui raciocínio)
 LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))

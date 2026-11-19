@@ -59,7 +59,7 @@ A configuração fica em `.streamlit/secrets.toml` (fora do git) ou nos Secrets 
 ```toml
 GEMINI_API_KEY = "sua-chave"
 # opcionais (valores padrão abaixo)
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.8-flash"
 PRECO_ENTRADA = 0.30   # US$ por 1M tokens
 PRECO_SAIDA = 2.50     # US$ por 1M tokens
 LIMITE_SESSAO = 15     # mensagens por visitante
