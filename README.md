@@ -2,11 +2,12 @@
 
 Atividade de IA aplicada e IA experimental (Prof. Wagner, 3º ciclo).
 
-Uma aplicação com IA generativa paga por **token**. Ela conhece o prompt que envia, mas **não sabe o tamanho da resposta**, que é a parte mais cara. O **TokenScope** é uma dashboard web que:
+Uma aplicação com IA generativa paga por **token**. Ela conhece a pergunta que envia, mas **não sabe o tamanho da resposta**, que é a parte mais cara. O **TokenScope** é um assistente com IA que mostra o custo de cada resposta:
 
-1. **prevê** quantos tokens a IA vai gerar para um prompt, com uma faixa de incerteza, usando um modelo treinado com 18.924 conversas reais;
-2. **calcula o custo** por requisição e por mês, e quanto se economiza limitando o tamanho da resposta;
-3. **executa o prompt no Gemini** pela API e compara a previsão com os tokens reais que a API informa, acumulando um histórico de acerto.
+1. o visitante **conversa com o Gemini** (a chave fica só no servidor);
+2. antes de cada resposta, um modelo treinado com 18.924 conversas reais **prevê** quantos tokens a IA vai gerar, com uma faixa de 80%;
+3. depois, o app mostra os **tokens reais e o custo** informados pela API, e um **painel** acumula o consumo de todos os visitantes e mede o acerto da previsão;
+4. a aba **O algoritmo** mostra os dados, a validação e a comparação com o chute ingênuo.
 
 ## Roteiro da atividade
 
@@ -16,9 +17,9 @@ Uma aplicação com IA generativa paga por **token**. Ela conhece o prompt que e
 | **Base de dados** | [OpenAssistant oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1) (Apache 2.0): ~88 mil mensagens reais, 18.924 pares prompt → resposta. |
 | **Técnica** | Inferir os tokens da resposta, comparar com um baseline e avaliar o impacto no custo. |
 | **Família de algoritmos** | Aprendizado supervisionado, **regressão**: Gradient Boosting, regressão quantílica (faixa de 80%), regressão linear e baseline. **Monte Carlo** para o custo mensal. |
-| **Token de IA** | O app usa a API do Gemini. Cada execução gasta tokens reais, que são medidos e comparados com a previsão. |
+| **Token de IA** | O assistente usa a API do Gemini. Cada resposta gasta tokens reais, que são medidos, somados no painel e comparados com a previsão. |
 | **É válido?** | Treino/teste 75/25, comparação com baseline, cobertura da faixa de 80% e validação ao vivo contra o Gemini. |
-| **Resultado explicado** | Aba "O modelo é válido?" do app e seção 8 do notebook. |
+| **Resultado explicado** | Aba "O algoritmo" do app e seção 8 do notebook. |
 
 ## Resultados
 
@@ -37,7 +38,7 @@ Uma aplicação com IA generativa paga por **token**. Ela conhece o prompt que e
 
 | Arquivo | O que é |
 |---|---|
-| `app.py` | Dashboard (Streamlit) |
+| `app.py` | Assistente, painel de consumo e abas do algoritmo (Streamlit) |
 | `core/modelo.py` | Treino e previsão do modelo, custo e economia |
 | `core/ia.py` | Chamadas ao Gemini e calibração de tokens |
 | `atividade_tokens_ia.ipynb` | Análise completa, executada, com gráficos e explicação |
@@ -53,11 +54,16 @@ python3 -m venv .venv
 .venv/bin/streamlit run app.py
 ```
 
-A API key do Gemini pode ser colada na barra lateral do app ou definida em `.streamlit/secrets.toml` (fora do git):
+A configuração fica em `.streamlit/secrets.toml` (fora do git) ou nos Secrets do Streamlit Cloud:
 
 ```toml
 GEMINI_API_KEY = "sua-chave"
-GEMINI_MODEL = "gemini-2.5-flash"  # opcional
+# opcionais (valores padrão abaixo)
+GEMINI_MODEL = "gemini-2.5-flash"
+PRECO_ENTRADA = 0.30   # US$ por 1M tokens
+PRECO_SAIDA = 2.50     # US$ por 1M tokens
+LIMITE_SESSAO = 15     # mensagens por visitante
+LIMITE_DIA = 300       # mensagens por dia, somando todos
 ```
 
 Para abrir o notebook: `.venv/bin/pip install ipykernel` e abra `atividade_tokens_ia.ipynb` no VS Code ou no Jupyter.
@@ -69,7 +75,7 @@ Para abrir o notebook: `.venv/bin/pip install ipykernel` e abra `atividade_token
 3. Em **Advanced settings → Secrets**, cole `GEMINI_API_KEY = "sua-chave"`.
 4. Clique em **Deploy**.
 
-Com a chave do servidor, cada visitante tem até 20 chamadas ao Gemini por sessão. Quem colar a própria chave na barra lateral não tem esse limite.
+Os limites por visitante e por dia protegem a cota da chave. O painel guarda o uso enquanto o servidor estiver no ar (o Streamlit Cloud reinicia o app depois de um tempo sem visitas).
 
 ![Distribuição de tokens](figures/01_distribuicao_tokens.png)
 ![Custo mensal](figures/04_custo_mensal.png)
