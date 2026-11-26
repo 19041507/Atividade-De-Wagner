@@ -25,6 +25,18 @@ from core.modelo import DADOS, ModeloTokens
 
 INSTRUCAO = ("Você é um assistente prestativo e direto. Responda no idioma do pedido, "
              "com clareza, usando listas ou exemplos quando ajudarem.")
+ESPERAS_SOBRECARGA = [30, 60, 120]  # segundos: a rodada não tem ninguém esperando, vale aguardar a sobrecarga passar
+
+
+def com_paciencia(chamada):
+    for espera in ESPERAS_SOBRECARGA + [None]:
+        try:
+            return chamada()
+        except ia.GeminiIndisponivel as e:
+            if espera is None:
+                raise
+            print(f"    Gemini indisponível ({str(e)[:40]}…); nova tentativa em {espera}s")
+            time.sleep(espera)
 
 
 def config(nome, padrao=None):
@@ -91,12 +103,12 @@ def main():
         pergunta = [{"papel": "user", "texto": p.texto}]
         lite_e_a = random.Random(p.id).random() < 0.5  # ordem sorteada: a juíza não sabe qual é qual
         try:
-            rf = ia.conversar(pergunta, chave, flash, INSTRUCAO)
+            rf = com_paciencia(lambda: ia.conversar(pergunta, chave, flash, INSTRUCAO))
             time.sleep(args.pausa)
-            rl = ia.conversar(pergunta, chave, lite, INSTRUCAO)
+            rl = com_paciencia(lambda: ia.conversar(pergunta, chave, lite, INSTRUCAO))
             time.sleep(args.pausa)
             a, b = (rl, rf) if lite_e_a else (rf, rl)
-            v = ia.julgar(p.texto, a.texto, b.texto, chave, flash)
+            v = com_paciencia(lambda: ia.julgar(p.texto, a.texto, b.texto, chave, flash))
             time.sleep(args.pausa)
         except Exception as e:
             falhas_seguidas += 1
