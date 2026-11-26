@@ -4,9 +4,15 @@ on:
   schedule:
     - cron: "0 11 * * *"  # todo dia, 8h de Brasília
   workflow_dispatch:
+    inputs:
+      forcar:
+        description: "Fazer outra rodada mesmo que a de hoje já exista"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: piloto
@@ -27,11 +33,14 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Rodada do dia
+        id: rodada
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GEMINI_MODEL_LITE: ${{ vars.GEMINI_MODEL_LITE }}
-        run: python rodar_piloto.py --n ${{ vars.PILOTO_PEDIDOS || 50 }} --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }}
+        run: python rodar_piloto.py --n ${{ vars.PILOTO_PEDIDOS || 50 }} --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }} ${{ inputs.forcar && '--forcar' || '' }}
 
       - name: Salva o resultado no repositório
         run: |
@@ -40,4 +49,13 @@ jobs:
           git add data/execucoes
           git diff --cached --quiet && exit 0
           git commit -m "chore(piloto): rodada de $(date -u +%F)"
+          git pull --rebase
           git push
+
+      - name: Abre uma issue se a qualidade caiu
+        if: steps.rodada.outputs.alerta != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERTA: ${{ steps.rodada.outputs.alerta }}
+        run: |
+          gh issue create --title "Piloto: $ALERTA" --body "Alerta automático da rodada de $(date -u +%F). O roteador foi retreinado com a meta de qualidade; acompanhe a próxima rodada no app."

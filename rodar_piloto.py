@@ -1,12 +1,13 @@
 """Rodada diária do piloto automático (o GitHub Actions roda este script uma vez por dia).
 
-Para cada pedido sorteado da fila:
+Teste controlado: para cada pedido sorteado da fila,
   1. o roteador decide Lite ou Flash, antes de chamar a IA;
-  2. modo avaliação: os dois modelos respondem, para medir o que teria acontecido com cada escolha;
+  2. os dois modelos respondem, para medir o que teria acontecido com cada escolha;
   3. a IA juíza compara as duas respostas sem saber qual é qual.
-No fim, grava data/execucoes/AAAA-MM-DD.csv e retreina o roteador com todos os vereditos acumulados.
+Depois retreina o roteador com tudo o que tem rótulo: as rodadas controladas e os pedidos reais do assistente
+(auditados pela juíza ou com 👍/👎 do usuário), escreve o diário do dia e avisa se a qualidade caiu.
 
-Uso: python rodar_piloto.py [--n 50] [--orcamento 0.50] [--meta 0.90]
+Uso: python rodar_piloto.py [--n 50] [--orcamento 0.50] [--meta 0.90] [--forcar]
 """
 
 import argparse
@@ -15,16 +16,15 @@ import random
 import sys
 import time
 import tomllib
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 
-from core import ia, piloto
+from core import banco as banco_mod
+from core import ia, piloto, producao
 from core.modelo import DADOS, ModeloTokens
 
-INSTRUCAO = ("Você é um assistente prestativo e direto. Responda no idioma do pedido, "
-             "com clareza, usando listas ou exemplos quando ajudarem.")
 ESPERAS_SOBRECARGA = [30, 60, 120]  # segundos: a rodada não tem ninguém esperando, vale aguardar a sobrecarga passar
 
 
@@ -49,12 +49,21 @@ def config(nome, padrao=None):
     return padrao
 
 
+def avisar(texto: str):
+    """No GitHub Actions, vira a saída 'alerta' do passo e o workflow abre uma issue."""
+    print(f"ALERTA: {texto}")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"alerta={texto}\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=50, help="pedidos por rodada")
-    ap.add_argument("--orcamento", type=float, default=0.50, help="US$ que o piloto pode gastar no dia")
+    ap.add_argument("--orcamento", type=float, default=0.50, help="US$ que o piloto pode gastar na rodada")
     ap.add_argument("--meta", type=float, default=0.90, help="qualidade mínima que o roteador deve manter")
     ap.add_argument("--pausa", type=float, default=4.0, help="segundos entre chamadas (limite por minuto da chave)")
+    ap.add_argument("--forcar", action="store_true", help="faz outra rodada mesmo que a de hoje já exista")
     ap.add_argument("--saida", default=str(DADOS / "execucoes"))
     args = ap.parse_args()
 
@@ -66,8 +75,10 @@ def main():
     saida.mkdir(parents=True, exist_ok=True)
     arquivo = saida / f"{hoje}.csv"
     if arquivo.exists():
-        print(f"A rodada de {hoje} já foi feita.")
-        return
+        if not args.forcar:
+            print(f"A rodada de {hoje} já foi feita (use --forcar para outra).")
+            return
+        arquivo = saida / f"{hoje}-{datetime.now():%H%M}.csv"
 
     historico = piloto.carregar_historico(saida)
     fila = pd.read_csv(DADOS / "fila_pedidos.csv")
@@ -75,22 +86,15 @@ def main():
         fila = fila[~fila.id.isin(historico.id)]
     if fila.empty:
         sys.exit("A fila de pedidos acabou.")
-    pedidos = fila.sample(min(args.n, len(fila)), random_state=int(hoje.strftime("%Y%m%d")))
+    pedidos = fila.sample(min(args.n, len(fila)), random_state=int(f"{datetime.now():%Y%m%d%H%M}") % 2**32)
 
     modelo = ModeloTokens()
-    flash = config("GEMINI_MODEL", "gemini-3.8-flash")
-    lite = config("GEMINI_MODEL_LITE") or ia.escolher_reserva(chave, flash)
-    if not lite:
-        sys.exit("Nenhum modelo Flash-Lite disponível na chave. Defina GEMINI_MODEL_LITE.")
-    precos = {
-        "flash": (float(config("PRECO_FLASH_ENTRADA", piloto.PRECOS_PADRAO["flash"][0])),
-                  float(config("PRECO_FLASH_SAIDA", piloto.PRECOS_PADRAO["flash"][1]))),
-        "lite": (float(config("PRECO_LITE_ENTRADA", piloto.PRECOS_PADRAO["lite"][0])),
-                 float(config("PRECO_LITE_SAIDA", piloto.PRECOS_PADRAO["lite"][1]))),
-    }
+    modelos = producao.modelos(config, chave)
+    precos = producao.precos(config)
     caminho_roteador = saida / "roteador.json"
     roteador = piloto.Roteador.carregar(caminho_roteador) or piloto.regra_inicial(modelo, fila)
-    print(f"{hoje}: {len(pedidos)} pedidos · Flash {flash} · Lite {lite} · roteador {roteador.tipo} v{roteador.versao}")
+    print(f"{arquivo.stem}: {len(pedidos)} pedidos · Flash {modelos['flash']} · Lite {modelos['lite']} "
+          f"· roteador {roteador.tipo} v{roteador.versao}")
 
     linhas, gasto_piloto, falhas_seguidas = [], 0.0, 0
     for i, p in enumerate(pedidos.itertuples(), 1):
@@ -101,14 +105,13 @@ def main():
             rota, motivo = "lite", "orçamento do dia quase no fim"
 
         pergunta = [{"papel": "user", "texto": p.texto}]
-        lite_e_a = random.Random(p.id).random() < 0.5  # ordem sorteada: a juíza não sabe qual é qual
         try:
-            rf = com_paciencia(lambda: ia.conversar(pergunta, chave, flash, INSTRUCAO))
+            rf = com_paciencia(lambda: ia.conversar(pergunta, chave, modelos["flash"], producao.INSTRUCAO))
             time.sleep(args.pausa)
-            rl = com_paciencia(lambda: ia.conversar(pergunta, chave, lite, INSTRUCAO))
+            rl = com_paciencia(lambda: ia.conversar(pergunta, chave, modelos["lite"], producao.INSTRUCAO))
             time.sleep(args.pausa)
-            a, b = (rl, rf) if lite_e_a else (rf, rl)
-            v = com_paciencia(lambda: ia.julgar(p.texto, a.texto, b.texto, chave, flash))
+            c = com_paciencia(lambda: ia.comparar(p.texto, rl.texto, rf.texto, chave, modelos["flash"],
+                                                  lite_e_a=random.Random(p.id).random() < 0.5))
             time.sleep(args.pausa)
         except Exception as e:
             falhas_seguidas += 1
@@ -119,11 +122,8 @@ def main():
             continue
         falhas_seguidas = 0
 
-        nota_lite, nota_flash = (v.nota_a, v.nota_b) if lite_e_a else (v.nota_b, v.nota_a)
-        vencedor = "empate" if v.melhor == "empate" else ("lite" if (v.melhor == "A") == lite_e_a else "flash")
         custo_flash = piloto.custo(precos["flash"], rf.prompt_tokens, rf.resposta_tokens + rf.raciocinio_tokens)
         custo_lite = piloto.custo(precos["lite"], rl.prompt_tokens, rl.resposta_tokens + rl.raciocinio_tokens)
-        jr = v.resposta
         gasto_piloto += custo_lite if rota == "lite" else custo_flash
         linhas.append({
             "data": str(hoje), "id": p.id, "lang": p.lang, "pedido": p.texto,
@@ -133,31 +133,57 @@ def main():
             "flash_entrada": rf.prompt_tokens, "flash_saida": rf.resposta_tokens, "flash_raciocinio": rf.raciocinio_tokens,
             "lite_entrada": rl.prompt_tokens, "lite_saida": rl.resposta_tokens, "lite_raciocinio": rl.raciocinio_tokens,
             "custo_flash": custo_flash, "custo_lite": custo_lite,
-            "custo_juiza": piloto.custo(precos["flash"], jr.prompt_tokens, jr.resposta_tokens + jr.raciocinio_tokens),
-            "nota_flash": nota_flash, "nota_lite": nota_lite, "vencedor": vencedor, "lite_ok": vencedor != "flash",
-            "motivo_juiza": v.motivo, "resposta_flash": rf.texto, "resposta_lite": rl.texto,
-            **{"x_" + c: x[c] for c in piloto.COLUNAS},
+            "custo_juiza": piloto.custo(precos["flash"], c.juiza.prompt_tokens,
+                                        c.juiza.resposta_tokens + c.juiza.raciocinio_tokens),
+            "nota_flash": c.nota_flash, "nota_lite": c.nota_lite, "vencedor": c.vencedor, "lite_ok": c.lite_ok,
+            "motivo_juiza": c.motivo, "resposta_flash": rf.texto, "resposta_lite": rl.texto,
+            **{"x_" + col: x[col] for col in piloto.COLUNAS},
         })
-        print(f"  [{i}] {rota:5} | juíza: {vencedor:6} | {motivo}")
+        print(f"  [{i}] {rota:5} | juíza: {c.vencedor:6} | {motivo}")
 
     if not linhas:
         sys.exit("Nenhum pedido foi atendido; nada gravado.")
     rodada = pd.DataFrame(linhas)
     rodada.to_csv(arquivo, index=False)
 
+    # Uso real das últimas 24 h e todos os rótulos reais acumulados.
+    banco = banco_mod.conectar(config("SUPABASE_URL"), config("SUPABASE_KEY"))
+    reais = pd.DataFrame()
+    if banco:
+        try:
+            reais = banco.listar()
+        except Exception as e:
+            print(f"Não consegui ler o uso real do Supabase: {str(e)[:150]}")
+    rotulados = piloto.rotulos_reais(reais)
+
     historico = pd.concat([historico, rodada], ignore_index=True)
-    novo = piloto.treinar(historico, args.meta, roteador)
+    treino = pd.concat([historico[["x_" + c for c in piloto.COLUNAS] + ["lite_ok", "data"]], rotulados],
+                       ignore_index=True)
+    novo = piloto.treinar(treino, args.meta, roteador)
     (novo or roteador).salvar(caminho_roteador)
 
-    r = piloto.avaliar(rodada)
-    print(f"\nRodada: {len(rodada)} pedidos · piloto gastou US$ {r.loc['Piloto automático', 'custo']:.4f} "
-          f"(economia de {r.loc['Piloto automático', 'economia']:.0%} sobre sempre Flash) "
-          f"· qualidade {r.loc['Piloto automático', 'qualidade']:.0%}")
+    r = piloto.avaliar(rodada).loc["Piloto automático"]
+    print(f"\nRodada: {len(rodada)} pedidos · piloto gastou US$ {r.custo:.4f} "
+          f"(economia de {r.economia:.0%} sobre sempre Flash) · qualidade {r.qualidade:.0%}")
     if novo:
         ult = novo.versoes[-1]
-        print(f"Roteador retreinado (v{novo.versao}): {ult['pedidos']} pedidos, AUC {ult['auc']:.2f}, corte {ult['corte']:.2f}")
+        print(f"Roteador retreinado (v{novo.versao}): {ult['pedidos']} rótulos ({len(rotulados)} do uso real), "
+              f"AUC {ult['auc']:.2f}, corte {ult['corte']:.2f}")
     else:
         print("Roteador mantido: ainda faltam vereditos para treinar (mínimo de 40, com 5 de cada tipo).")
+
+    ontem = datetime.now(timezone.utc) - timedelta(days=1)
+    reais_24h = reais[reais.criado_em >= ontem] if not reais.empty else reais
+    try:
+        diario = producao.escrever_diario(rodada, r, roteador, novo, reais_24h, chave, modelos["flash"])
+        arquivo.with_suffix(".md").write_text(diario)
+        print(f"\nDiário:\n{diario}")
+    except Exception as e:
+        print(f"Diário não escrito: {str(e)[:150]}")
+
+    if r.qualidade < args.meta:
+        corte = f"; corte do roteador agora {novo.corte:.2f}" if novo else ""
+        avisar(f"qualidade da rodada {arquivo.stem} caiu para {r.qualidade:.0%} (meta {args.meta:.0%}){corte}")
 
 
 if __name__ == "__main__":
