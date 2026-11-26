@@ -72,7 +72,8 @@ def escolher_reserva(chave: str, principal: str) -> str | None:
 
 
 def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
-              reserva: str | None = None, ao_receber: Callable[[str], None] | None = None) -> RespostaIA:
+              reserva: str | None = None, ao_receber: Callable[[str], None] | None = None,
+              esquema_json: dict | None = None) -> RespostaIA:
     """Gera a resposta em streaming: ao_receber é chamado com o texto acumulado a cada pedaço.
 
     mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
@@ -93,6 +94,8 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
         config = types.GenerateContentConfig(
             system_instruction=instrucao,
             thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL) if pensar_pouco else None,
+            response_mime_type="application/json" if esquema_json else None,
+            response_json_schema=esquema_json,
         )
         texto, uso = "", None
         inicio = time.perf_counter()
@@ -133,6 +136,44 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
         modelo=nome,
     )
 
+
+INSTRUCAO_JUIZA = (
+    "Você avalia respostas de assistentes de IA. Recebe um pedido e duas respostas, A e B. "
+    "Julgue só se cada uma atende ao pedido: correção, completude e clareza. "
+    "Não favoreça a resposta mais longa nem a que aparece primeiro: uma resposta curta e certa vale tanto quanto uma longa e certa. "
+    "Dê nota de 1 a 5 para cada e diga qual é melhor, ou 'empate' se um usuário ficaria igualmente bem servido com qualquer uma. "
+    "O motivo deve ter no máximo uma frase, em português."
+)
+ESQUEMA_JUIZA = {
+    "type": "object",
+    "properties": {
+        "nota_a": {"type": "integer", "minimum": 1, "maximum": 5},
+        "nota_b": {"type": "integer", "minimum": 1, "maximum": 5},
+        "melhor": {"type": "string", "enum": ["A", "B", "empate"]},
+        "motivo": {"type": "string"},
+    },
+    "required": ["nota_a", "nota_b", "melhor", "motivo"],
+}
+
+
+@dataclass
+class Veredito:
+    nota_a: int
+    nota_b: int
+    melhor: str  # "A", "B" ou "empate"
+    motivo: str
+    resposta: RespostaIA  # a chamada da juíza também gasta tokens
+
+
+def julgar(pedido: str, resposta_a: str, resposta_b: str, chave: str, modelo: str,
+           reserva: str | None = None) -> Veredito:
+    """IA juíza: compara duas respostas ao mesmo pedido sem saber qual modelo gerou cada uma."""
+    import json
+    texto = f"PEDIDO:\n{pedido}\n\nRESPOSTA A:\n{resposta_a}\n\nRESPOSTA B:\n{resposta_b}"
+    r = conversar([{"papel": "user", "texto": texto}], chave, modelo, INSTRUCAO_JUIZA,
+                  reserva=reserva, esquema_json=ESQUEMA_JUIZA)
+    v = json.loads(r.texto)
+    return Veredito(int(v["nota_a"]), int(v["nota_b"]), v["melhor"], v["motivo"], r)
 
 def fator_calibracao(chave: str, modelo: str) -> float:
     """Tokens do Gemini por token do o200k_base, medido numa amostra de 300 respostas reais da base.
