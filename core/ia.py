@@ -23,6 +23,7 @@ class RespostaIA:
     raciocinio_tokens: int  # "thinking": cobrado como saída, mas não aparece no texto
     segundos: float
     modelo: str
+    cortada: bool = False  # a resposta bateu no teto de tokens
 
 
 def _cliente(chave: str, timeout_ms: int = TIMEOUT_MS):
@@ -87,7 +88,8 @@ def escolher_juiza(chave: str) -> str | None:
 
 def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
               reserva: str | None = None, ao_receber: Callable[[str], None] | None = None,
-              esquema_json: dict | None = None, timeout_ms: int = TIMEOUT_MS) -> RespostaIA:
+              esquema_json: dict | None = None, timeout_ms: int = TIMEOUT_MS,
+              max_tokens: int | None = None) -> RespostaIA:
     """Gera a resposta em streaming: ao_receber é chamado com o texto acumulado a cada pedaço.
 
     mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
@@ -110,8 +112,9 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
             thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL) if pensar_pouco else None,
             response_mime_type="application/json" if esquema_json else None,
             response_json_schema=esquema_json,
+            max_output_tokens=max_tokens,
         )
-        texto, uso = "", None
+        texto, uso, fim = "", None, None
         inicio = time.perf_counter()
         try:
             for pedaco in cliente.models.generate_content_stream(model=nome, contents=contents, config=config):
@@ -121,6 +124,8 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
                         ao_receber(texto)
                 if pedaco.usage_metadata:
                     uso = pedaco.usage_metadata
+                if pedaco.candidates and pedaco.candidates[0].finish_reason:
+                    fim = pedaco.candidates[0].finish_reason
             break
         except Exception as e:
             if pensar_pouco and _rejeita_raciocinio(e):
@@ -148,6 +153,7 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
         raciocinio_tokens=(uso and uso.thoughts_token_count) or 0,
         segundos=time.perf_counter() - inicio,
         modelo=nome,
+        cortada="MAX_TOKENS" in str(fim),
     )
 
 

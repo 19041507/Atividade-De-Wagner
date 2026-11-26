@@ -85,6 +85,7 @@ PRECO_JUIZA_SAIDA = 10.00
 LIMITE_SESSAO = 20            # perguntas por visitante
 LIMITE_DIA = 300              # perguntas por dia, somando todos
 ORCAMENTO_DIA = 1.00          # US$: passou disso, só o Lite até o dia seguinte
+MAX_TOKENS_RESPOSTA = 2048    # teto de tokens de saída por resposta do assistente
 ```
 
 ## Como rodar

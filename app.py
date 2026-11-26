@@ -192,6 +192,7 @@ CHAVE = config("GEMINI_API_KEY")
 LIMITE_SESSAO = int(config("LIMITE_SESSAO", 20))
 LIMITE_DIA = int(config("LIMITE_DIA", 300))
 ORCAMENTO_DIA = float(config("ORCAMENTO_DIA", 1.00))  # US$: passou disso, só o Lite até o dia seguinte
+MAX_TOKENS_RESPOSTA = int(config("MAX_TOKENS_RESPOSTA", 2048))  # teto de saída por resposta (inclui raciocínio)
 PRECOS = producao.precos(config)
 banco = conectar(config("SUPABASE_URL"), config("SUPABASE_KEY"))
 
@@ -298,6 +299,8 @@ def rodape(m):
     if m["rota"] == "lite":
         partes.append(f'o Flash custaria ~{usd(m["custo_flash"])} (−{pct(economia)})')
     partes.append(f'{br(m["segundos"], 1)} s')
+    if m.get("cortada"):
+        partes.append(f'cortada no limite de {br(MAX_TOKENS_RESPOSTA)} tokens')
     st.html(f'<div class="etiquetas conta">{"".join(f"<span>{p}</span>" for p in partes)}</div>')
     if m.get("id"):
         st.feedback("thumbs", key=f"fb_{m['id']}", on_change=salvar_feedback, args=(m["id"],))
@@ -367,7 +370,8 @@ if secao == "Assistente":
                 outro = "flash" if d.rota == "lite" else "lite"
                 try:
                     r = ia.conversar(mensagens, CHAVE, MODELOS[d.rota], producao.INSTRUCAO, reserva=MODELOS[outro],
-                                     ao_receber=lambda t: saida.markdown(t + " ▍"))
+                                     ao_receber=lambda t: saida.markdown(t + " ▍"),
+                                     max_tokens=MAX_TOKENS_RESPOSTA)
                 except Exception as e:
                     conversa.pop()
                     saida.empty()
@@ -379,7 +383,7 @@ if secao == "Assistente":
                         st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
                 else:
                     reg = producao.registro(st.session_state.sessao, pergunta, d, r, MODELOS, PRECOS,
-                                            piloto.razao_flash_lite(hist), rot.versao)
+                                            piloto.razao_flash_lite(hist), rot.versao, MAX_TOKENS_RESPOSTA)
                     id_ = None
                     if banco:
                         try:
@@ -389,10 +393,11 @@ if secao == "Assistente":
                             st.caption(f"Resposta não registrada no banco: {str(e)[:120]}")
                     if id_ and not reg["forcado"] and producao.amostra_auditoria():
                         threading.Thread(target=producao.auditar, daemon=True,
-                                         args=(banco, id_, mensagens, reg, MODELOS, PRECOS, CHAVE)).start()
+                                         args=(banco, id_, mensagens, reg, MODELOS, PRECOS, CHAVE, MAX_TOKENS_RESPOSTA)).start()
                     conversa.append({"papel": "model", "texto": r.texto, "id": id_, "rota": reg["rota"],
                                      "motivo": reg["motivo"], "custo": reg["custo"],
-                                     "custo_flash": reg["custo_flash_estimado"], "segundos": r.segundos})
+                                     "custo_flash": reg["custo_flash_estimado"], "segundos": r.segundos,
+                                     "cortada": r.cortada})
                     st.rerun()
 
 # ---------- Resultados ----------

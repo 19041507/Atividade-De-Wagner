@@ -53,7 +53,7 @@ def tipo_do_modelo(nome: str, modelos_: dict) -> str:
 
 
 def registro(sessao: str, pedido: str, d: Decisao, r: ia.RespostaIA, modelos_: dict, precos_: dict,
-             razao_flash_lite: float, versao_roteador: int) -> dict:
+             razao_flash_lite: float, versao_roteador: int, max_tokens: int | None = None) -> dict:
     """A linha da tabela pedidos: decisão, resposta entregue, custo pago e quanto o Flash custaria."""
     rota, motivo, forcado = d.rota, d.motivo, d.forcado
     tipo = tipo_do_modelo(r.modelo, modelos_)
@@ -61,7 +61,8 @@ def registro(sessao: str, pedido: str, d: Decisao, r: ia.RespostaIA, modelos_: d
         rota, motivo, forcado = tipo, f"{d.motivo} · o {d.rota.capitalize()} estava indisponível", True
     saida = r.resposta_tokens + r.raciocinio_tokens
     custo = piloto.custo(precos_[rota], r.prompt_tokens, saida)
-    custo_flash = custo if rota == "flash" else piloto.custo(precos_["flash"], r.prompt_tokens, saida * razao_flash_lite)
+    saida_flash = min(saida * razao_flash_lite, max_tokens or float("inf"))  # o Flash também pararia no teto
+    custo_flash = custo if rota == "flash" else piloto.custo(precos_["flash"], r.prompt_tokens, saida_flash)
     return {
         "sessao": sessao, "pedido": pedido, "lang": "pt-BR",
         "rota": rota, "motivo": motivo, "forcado": forcado, "prob_lite_ok": d.prob_lite_ok,
@@ -72,12 +73,14 @@ def registro(sessao: str, pedido: str, d: Decisao, r: ia.RespostaIA, modelos_: d
     }
 
 
-def auditar(banco: Banco, id_: str, conversa: list[dict], reg: dict, modelos_: dict, precos_: dict, chave: str):
+def auditar(banco: Banco, id_: str, conversa: list[dict], reg: dict, modelos_: dict, precos_: dict, chave: str,
+            max_tokens: int | None = None):
     """Roda numa thread depois que o usuário já recebeu a resposta: gera a do outro modelo e pede o veredito."""
     rota = reg["rota"]
     outro = "flash" if rota == "lite" else "lite"
     try:
-        alt = ia.conversar(conversa, chave, modelos_[outro], INSTRUCAO)
+        # mesmo teto de tokens da resposta entregue: a comparação é nas mesmas condições
+        alt = ia.conversar(conversa, chave, modelos_[outro], INSTRUCAO, max_tokens=max_tokens)
         lite, flash = (reg["resposta"], alt.texto) if rota == "lite" else (alt.texto, reg["resposta"])
         c = ia.comparar(reg["pedido"], lite, flash, chave, modelos_["juiza"], lite_e_a=random.random() < 0.5)
         banco.atualizar(id_, {
