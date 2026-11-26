@@ -12,7 +12,7 @@ on:
       pedidos:
         description: "Pedidos nesta rodada"
         type: number
-        default: 50
+        default: 20
 
 permissions:
   contents: write
@@ -45,7 +45,7 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GEMINI_MODEL_LITE: ${{ vars.GEMINI_MODEL_LITE }}
           GEMINI_MODEL_JUIZA: ${{ vars.GEMINI_MODEL_JUIZA }}
-        run: python rodar_piloto.py --n ${{ inputs.pedidos || vars.PILOTO_PEDIDOS || 50 }} --pausa 12 --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }} ${{ inputs.forcar && '--forcar' || '' }}
+        run: python rodar_piloto.py --n ${{ inputs.pedidos || vars.PILOTO_PEDIDOS || 20 }} --pausa 12 --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }} ${{ inputs.forcar && '--forcar' || '' }}
 
       - name: Salva o resultado no repositório
         run: |

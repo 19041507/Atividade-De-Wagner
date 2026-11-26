@@ -33,7 +33,7 @@ def com_paciencia(chamada):
         try:
             return chamada()
         except ia.GeminiIndisponivel as e:
-            if espera is None:
+            if espera is None or ia.cota_diaria_esgotada(e):
                 raise
             print(f"    Gemini indisponível ({str(e)[:40]}…); nova tentativa em {espera}s")
             time.sleep(espera)
@@ -59,7 +59,7 @@ def avisar(texto: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, default=50, help="pedidos por rodada")
+    ap.add_argument("--n", type=int, default=20, help="pedidos por rodada (3 chamadas cada: cabe na cota gratuita)")
     ap.add_argument("--orcamento", type=float, default=0.50, help="US$ que o piloto pode gastar na rodada")
     ap.add_argument("--meta", type=float, default=0.90, help="qualidade mínima que o roteador deve manter")
     ap.add_argument("--pausa", type=float, default=4.0, help="segundos entre chamadas (limite por minuto da chave)")
@@ -114,8 +114,12 @@ def main():
                                                   lite_e_a=random.Random(p.id).random() < 0.5))
             time.sleep(args.pausa)
         except Exception as e:
+            if ia.cota_diaria_esgotada(e):
+                print(f"  [{i}] cota diária do Gemini esgotada ({ia.detalhe_da_cota(e)}).")
+                print(f"  Rodada encerrada com {len(linhas)} pedidos; os próximos ficam para amanhã.")
+                break
             falhas_seguidas += 1
-            print(f"  [{i}] falhou: {str(e)[:150]}")
+            print(f"  [{i}] falhou: {ia.detalhe_da_cota(e) if '429' in str(e) else str(e)[:300]}")
             if falhas_seguidas >= 3:
                 print("  3 falhas seguidas: rodada encerrada.")
                 break

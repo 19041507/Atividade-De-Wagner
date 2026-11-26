@@ -47,6 +47,23 @@ def _tempo_esgotado(e: Exception) -> bool:
     return isinstance(e, TimeoutError) or any(c.__name__ == "TimeoutException" for c in type(e).__mro__)
 
 
+def cota_diaria_esgotada(erro) -> bool:
+    """429 por limite diário (não adianta esperar minutos, só no dia seguinte)."""
+    texto = str(erro)
+    return "429" in texto and "PerDay" in texto
+
+
+def detalhe_da_cota(erro) -> str:
+    """Qual cota estourou: métrica, modelo e limite, como o Google informa no corpo do 429."""
+    import re
+    texto = str(erro)
+    partes = [f"{campo}={m.group(1)}" for campo, padrao in [
+        ("cota", r"'quotaId': '([^']+)'"), ("modelo", r"'model': '([^']+)'"),
+        ("limite", r"'quotaValue': '([^']+)'"), ("tentar em", r"'retryDelay': '([^']+)'")]
+        if (m := re.search(padrao, texto))]
+    return ", ".join(partes) or texto[:300]
+
+
 def _rejeita_raciocinio(e: Exception) -> bool:
     from google.genai import errors
     return isinstance(e, errors.APIError) and e.code == 400 and "think" in str(e).lower()

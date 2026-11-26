@@ -97,7 +97,7 @@ python3 -m venv .venv
 .venv/bin/python rodar_piloto.py --n 5   # uma rodada pequena do teste controlado
 ```
 
-Opções da rodada: `--n` (pedidos, padrão 50), `--orcamento` (US$ da rodada, padrão 0,50), `--meta` (qualidade mínima, padrão 0,90), `--pausa` (segundos entre chamadas, padrão 4), `--forcar` (outra rodada no mesmo dia).
+Opções da rodada: `--n` (pedidos, padrão 20: 3 chamadas cada, para caber na cota gratuita), `--orcamento` (US$ da rodada, padrão 0,50), `--meta` (qualidade mínima, padrão 0,90), `--pausa` (segundos entre chamadas, padrão 4), `--forcar` (outra rodada no mesmo dia).
 
 ## Automação no GitHub
 
