@@ -117,19 +117,28 @@ def treinar(historico: pd.DataFrame, meta_qualidade: float, versao_anterior: Rot
 
 
 def carregar_historico(pasta: Path) -> pd.DataFrame:
-    arquivos = sorted(pasta.glob("????-??-??.csv"))
+    """Rodadas do teste controlado: um CSV por rodada (AAAA-MM-DD.csv, ou AAAA-MM-DD-HHMM.csv se houve mais de uma)."""
+    arquivos = sorted(pasta.glob("????-??-??*.csv"))
     if not arquivos:
         return pd.DataFrame()
-    return pd.concat([pd.read_csv(a) for a in arquivos], ignore_index=True)
+    h = pd.concat([pd.read_csv(a).assign(rodada=a.stem) for a in arquivos], ignore_index=True)
+    h["data"] = h.data.astype(str)
+    return h
 
 
-def avaliar(h: pd.DataFrame) -> pd.DataFrame:
-    """Custo e qualidade de quatro estratégias nos mesmos pedidos (as duas respostas foram geradas para todos)."""
+def usa_regra(h: pd.DataFrame, limiar_p90: float) -> np.ndarray:
+    """A regra da partida a frio aplicada a pedidos já avaliados (para comparar com o roteador aprendido)."""
+    return ((h.x_tem_codigo == 0) & (np.expm1(h.x_log_p90) < limiar_p90)).values
+
+
+def avaliar(h: pd.DataFrame, limiar_p90: float | None = None) -> pd.DataFrame:
+    """Custo e qualidade das estratégias nos mesmos pedidos (as duas respostas foram geradas para todos)."""
     lite_ok = h.lite_ok.astype(bool).values
     rota_lite = (h.rota == "lite").values
     estrategias = {
         "Sempre Flash": np.zeros(len(h), bool),
         "Sempre Lite": np.ones(len(h), bool),
+        **({"Regra fixa": usa_regra(h, limiar_p90)} if limiar_p90 else {}),
         "Piloto automático": rota_lite,
         "Escolha perfeita": lite_ok,
     }
@@ -144,3 +153,54 @@ def avaliar(h: pd.DataFrame) -> pd.DataFrame:
     r = pd.DataFrame(linhas).set_index("estrategia")
     r["economia"] = 1 - r.custo / r.loc["Sempre Flash", "custo"]
     return r
+
+
+def intervalo(valores: pd.DataFrame, estatistica, n: int = 1000, seed: int = 0) -> tuple[float, float]:
+    """Intervalo de confiança de 95% por bootstrap: reamostra os pedidos e recalcula a estatística."""
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(valores), size=(n, len(valores)))
+    amostras = [estatistica(valores.iloc[i]) for i in idx]
+    return float(np.percentile(amostras, 2.5)), float(np.percentile(amostras, 97.5))
+
+
+def projetar(custo_piloto: np.ndarray, custo_flash: np.ndarray, volume: int, simulacoes: int = 2000, seed: int = 0):
+    """Monte Carlo: economia mensal (US$) de uma aplicação com `volume` pedidos por mês, sorteando pedidos reais."""
+    rng = np.random.default_rng(seed)
+    n = min(volume, 5000)
+    idx = rng.integers(0, len(custo_piloto), size=(simulacoes, n))
+    return (custo_flash[idx].sum(1) - custo_piloto[idx].sum(1)) * volume / n
+
+
+# ---------- uso real (tabela pedidos no Supabase) ----------
+
+def razao_flash_lite(h: pd.DataFrame) -> float:
+    """Quantas vezes a resposta do Flash é maior que a do Lite, medido no teste controlado.
+
+    Serve para estimar quanto o Flash custaria num pedido real que foi para o Lite e não foi auditado.
+    """
+    if h.empty:
+        return 1.0
+    f = h.flash_saida + h.flash_raciocinio
+    l = (h.lite_saida + h.lite_raciocinio).clip(lower=1)
+    return float(np.median(f / l))
+
+
+def custo_flash_real(r: pd.DataFrame) -> np.ndarray:
+    """Quanto cada pedido real custaria no Flash: o custo pago, o da auditoria ou a estimativa."""
+    auditado_lite = r.auditado & (r.rota == "lite") & r.custo_alt.notna()
+    return np.where(r.rota == "flash", r.custo, np.where(auditado_lite, r.custo_alt, r.custo_flash_estimado))
+
+
+def rotulos_reais(r: pd.DataFrame) -> pd.DataFrame:
+    """Pedidos reais que viram dado de treino: os auditados (rótulo da juíza) e os do Lite com 👍/👎 do usuário."""
+    if r.empty:
+        return pd.DataFrame()
+    auditados = r[r.auditado & r.lite_ok.notna() & ~r.forcado]
+    com_feedback = r[~r.auditado & (r.rota == "lite") & r.feedback.notna() & ~r.forcado]
+    base = pd.concat([auditados.assign(lite_ok=auditados.lite_ok.astype(bool)),
+                      com_feedback.assign(lite_ok=com_feedback.feedback > 0)])
+    if base.empty:
+        return pd.DataFrame()
+    x = pd.DataFrame(list(base.x)).add_prefix("x_")
+    return pd.concat([x, pd.DataFrame({"lite_ok": base.lite_ok.values,
+                                       "data": base.criado_em.dt.strftime("%Y-%m-%d").values})], axis=1)
