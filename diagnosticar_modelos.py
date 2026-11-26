@@ -16,9 +16,14 @@ from core import ia
 chave = os.environ.get("GEMINI_API_KEY") or sys.exit("GEMINI_API_KEY não configurada.")
 cliente = genai.Client(api_key=chave, http_options=types.HttpOptions(timeout=60_000))
 excluir = ("tts", "image", "live", "audio", "embedding", "computer", "robotics", "native")
+# Modelos reservados para a demonstração ao vivo: o diagnóstico não gasta a cota deles.
+reservados = os.environ.get("MODELOS_RESERVADOS", "gemini-3.8-flash,gemini-3.7-flash").split(",")
 nomes = sorted(m.name.removeprefix("models/") for m in cliente.models.list()
                if "generateContent" in (m.supported_actions or [])
                and re.search(r"flash|pro", m.name) and not any(x in m.name for x in excluir))
+for nome in [n for n in nomes if n in reservados]:
+    print(f"{nome:40} 🔒 reservado          não testado, para não gastar a cota")
+nomes = [n for n in nomes if n not in reservados]
 
 linhas = []
 for nome in nomes:
