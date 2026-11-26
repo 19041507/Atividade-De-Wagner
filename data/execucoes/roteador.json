@@ -1,0 +1,10 @@
+{
+ "tipo": "regra",
+ "limiar_p90": 395.3087463013129,
+ "media": [],
+ "desvio": [],
+ "pesos": [],
+ "intercepto": 0.0,
+ "corte": 0.5,
+ "versoes": []
+}
