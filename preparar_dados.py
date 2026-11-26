@@ -2,6 +2,7 @@
 
 - data/tokens_por_idioma.csv: tokens a cada 1.000 caracteres por idioma
 - data/amostra_calibracao.csv: 300 respostas reais, usadas para calibrar o tokenizador do Gemini
+- data/fila_pedidos.csv: perguntas reais que o piloto automático atende, uma rodada por dia
 
 Os pares prompt → resposta (data/pares_prompt_resposta.csv) são gerados pelo notebook.
 """
@@ -9,8 +10,10 @@ Os pares prompt → resposta (data/pares_prompt_resposta.csv) são gerados pelo 
 import urllib.request
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import tiktoken
+from sklearn.model_selection import train_test_split
 
 RAW = Path("data/raw/oasst_ready.messages.jsonl.gz")
 URL = "https://huggingface.co/datasets/OpenAssistant/oasst1/resolve/main/2023-04-12_oasst_ready.messages.jsonl.gz"
@@ -31,4 +34,19 @@ idiomas.to_csv("data/tokens_por_idioma.csv")
 
 respostas = msgs[(msgs.role == "assistant") & (msgs["rank"] == 0)]
 respostas.sample(300, random_state=7)[["lang", "text", "tokens"]].to_csv("data/amostra_calibracao.csv", index=False)
-print("ok")
+
+# Fila do piloto: perguntas do conjunto de TESTE do modelo de tokens (mesma ordem dos pares e mesmo
+# train_test_split de core/modelo.py), para o roteador nunca decidir sobre algo que o previsor viu no treino.
+prompts = msgs.set_index("message_id").loc[respostas.parent_id].reset_index()
+_, teste = train_test_split(np.arange(len(prompts)), test_size=0.25, random_state=42)
+fila = prompts.iloc[np.sort(teste)]
+fila = fila[fila.lang.isin(["pt-BR", "en", "es"])           # idiomas que a juíza e as pessoas conseguem ler
+            & fila.parent_id.isna()                          # primeira mensagem: o pedido se explica sozinho
+            & fila.tokens.between(8, 400)]                   # sem "oi" e sem textos colados enormes
+fila = pd.DataFrame({
+    "id": fila.message_id.values,
+    "lang": fila.lang.values,
+    "texto": fila.text.values,
+})
+fila.to_csv("data/fila_pedidos.csv", index=False)
+print(f"ok: {len(fila)} pedidos na fila")
