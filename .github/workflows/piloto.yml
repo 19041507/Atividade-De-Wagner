@@ -1,0 +1,43 @@
+name: Piloto automático
+
+on:
+  schedule:
+    - cron: "0 11 * * *"  # todo dia, 8h de Brasília
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: piloto
+  cancel-in-progress: false
+
+jobs:
+  rodada:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Rodada do dia
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GEMINI_MODEL_LITE: ${{ vars.GEMINI_MODEL_LITE }}
+        run: python rodar_piloto.py --n ${{ vars.PILOTO_PEDIDOS || 50 }} --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }}
+
+      - name: Salva o resultado no repositório
+        run: |
+          git config user.name "piloto-automatico"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/execucoes
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(piloto): rodada de $(date -u +%F)"
+          git push
