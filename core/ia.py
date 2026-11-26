@@ -171,3 +171,26 @@ def julgar(pedido: str, resposta_a: str, resposta_b: str, chave: str, modelo: st
     v = json.loads(r.texto)
     return Veredito(int(v["nota_a"]), int(v["nota_b"]), v["melhor"], v["motivo"], r)
 
+
+@dataclass
+class Comparacao:
+    nota_lite: int
+    nota_flash: int
+    vencedor: str  # "lite", "flash" ou "empate"
+    motivo: str
+    juiza: RespostaIA
+
+    @property
+    def lite_ok(self) -> bool:
+        return self.vencedor != "flash"
+
+
+def comparar(pedido: str, resposta_lite: str, resposta_flash: str, chave: str, modelo: str,
+             lite_e_a: bool) -> Comparacao:
+    """Julga Lite × Flash às cegas: lite_e_a (sorteado por quem chama) decide qual vai como resposta A."""
+    a, b = (resposta_lite, resposta_flash) if lite_e_a else (resposta_flash, resposta_lite)
+    v = julgar(pedido, a, b, chave, modelo)
+    nota_lite, nota_flash = (v.nota_a, v.nota_b) if lite_e_a else (v.nota_b, v.nota_a)
+    vencedor = "empate" if v.melhor == "empate" else ("lite" if (v.melhor == "A") == lite_e_a else "flash")
+    return Comparacao(nota_lite, nota_flash, vencedor, v.motivo, v.resposta)
+
