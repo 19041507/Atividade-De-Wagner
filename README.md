@@ -7,7 +7,7 @@ Uma aplicação com IA generativa paga por **token**, e o modelo mais capaz cust
 O **TokenScope** é um assistente em que essa escolha é feita por uma IA, sozinha, em cada pergunta:
 
 1. **Decide:** antes de chamar o Gemini, um roteador escolhe o **Flash-Lite** (barato) ou o **Flash** (mais capaz). Só o escolhido responde, então a economia é real.
-2. **Audita:** em 1 de cada 5 perguntas, depois que o usuário já recebeu a resposta, o outro modelo também responde e uma **IA juíza** compara as duas às cegas. O usuário também avalia com 👍/👎.
+2. **Audita:** em 1 de cada 5 perguntas, depois que o usuário já recebeu a resposta, o outro modelo também responde e uma **IA juíza** (o Gemini Pro, maior e diferente dos dois modelos avaliados) compara as duas às cegas. O usuário também avalia com 👍/👎.
 3. **Testa:** todo dia, o GitHub Actions roda um **teste controlado** com pedidos reais do OpenAssistant nos dois modelos e na juíza, comparando todas as estratégias nos mesmos pedidos.
 4. **Aprende:** o roteador se retreina com os vereditos do teste e do uso real.
 5. **Relata:** a IA escreve o diário do dia e, se a qualidade cair abaixo da meta, o workflow abre uma issue sozinho.
@@ -75,10 +75,13 @@ SUPABASE_KEY = "sb_secret_..."
 # opcionais
 GEMINI_MODEL = "gemini-3.8-flash"
 GEMINI_MODEL_LITE = ""        # vazio: escolhe um Flash-Lite que a chave tenha
+GEMINI_MODEL_JUIZA = ""       # vazio: escolhe o Gemini Pro mais recente da chave (sem Pro, o Flash julga)
 PRECO_FLASH_ENTRADA = 0.30    # US$ por 1M tokens
 PRECO_FLASH_SAIDA = 2.50
 PRECO_LITE_ENTRADA = 0.10
 PRECO_LITE_SAIDA = 0.40
+PRECO_JUIZA_ENTRADA = 1.25
+PRECO_JUIZA_SAIDA = 10.00
 LIMITE_SESSAO = 20            # perguntas por visitante
 LIMITE_DIA = 300              # perguntas por dia, somando todos
 ORCAMENTO_DIA = 1.00          # US$: passou disso, só o Lite até o dia seguinte
@@ -97,7 +100,7 @@ Opções da rodada: `--n` (pedidos, padrão 50), `--orcamento` (US$ da rodada, p
 
 ## Automação no GitHub
 
-A rodada roda todo dia às 8h (Brasília). Para rodar na hora: **Actions → Piloto automático → Run workflow** (com "Fazer outra rodada" marcado, dá para rodar várias no mesmo dia). Variáveis opcionais em **Settings → Variables**: `GEMINI_MODEL`, `GEMINI_MODEL_LITE`, `PILOTO_PEDIDOS`, `PILOTO_ORCAMENTO`.
+A rodada roda todo dia às 8h (Brasília). Para rodar na hora: **Actions → Piloto automático → Run workflow** (com "Fazer outra rodada" marcado, dá para rodar várias no mesmo dia). Variáveis opcionais em **Settings → Variables**: `GEMINI_MODEL`, `GEMINI_MODEL_LITE`, `GEMINI_MODEL_JUIZA`, `PILOTO_PEDIDOS`, `PILOTO_ORCAMENTO`.
 
 ## Publicar no Streamlit Community Cloud
 

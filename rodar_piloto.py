@@ -94,7 +94,7 @@ def main():
     caminho_roteador = saida / "roteador.json"
     roteador = piloto.Roteador.carregar(caminho_roteador) or piloto.regra_inicial(modelo, fila)
     print(f"{arquivo.stem}: {len(pedidos)} pedidos · Flash {modelos['flash']} · Lite {modelos['lite']} "
-          f"· roteador {roteador.tipo} v{roteador.versao}")
+          f"· juíza {modelos['juiza']} · roteador {roteador.tipo} v{roteador.versao}")
 
     linhas, gasto_piloto, falhas_seguidas = [], 0.0, 0
     for i, p in enumerate(pedidos.itertuples(), 1):
@@ -110,7 +110,7 @@ def main():
             time.sleep(args.pausa)
             rl = com_paciencia(lambda: ia.conversar(pergunta, chave, modelos["lite"], producao.INSTRUCAO))
             time.sleep(args.pausa)
-            c = com_paciencia(lambda: ia.comparar(p.texto, rl.texto, rf.texto, chave, modelos["flash"],
+            c = com_paciencia(lambda: ia.comparar(p.texto, rl.texto, rf.texto, chave, modelos["juiza"],
                                                   lite_e_a=random.Random(p.id).random() < 0.5))
             time.sleep(args.pausa)
         except Exception as e:
@@ -129,11 +129,11 @@ def main():
             "data": str(hoje), "id": p.id, "lang": p.lang, "pedido": p.texto,
             "rota": rota, "motivo": motivo, "prob_lite_ok": roteador.prob_lite_ok(x), "versao_roteador": roteador.versao,
             "previsto_p10": prev.p10, "previsto_mediana": prev.mediana, "previsto_p90": prev.p90,
-            "modelo_flash": rf.modelo, "modelo_lite": rl.modelo,
+            "modelo_flash": rf.modelo, "modelo_lite": rl.modelo, "modelo_juiza": c.juiza.modelo,
             "flash_entrada": rf.prompt_tokens, "flash_saida": rf.resposta_tokens, "flash_raciocinio": rf.raciocinio_tokens,
             "lite_entrada": rl.prompt_tokens, "lite_saida": rl.resposta_tokens, "lite_raciocinio": rl.raciocinio_tokens,
             "custo_flash": custo_flash, "custo_lite": custo_lite,
-            "custo_juiza": piloto.custo(precos["flash"], c.juiza.prompt_tokens,
+            "custo_juiza": piloto.custo(precos["juiza"], c.juiza.prompt_tokens,
                                         c.juiza.resposta_tokens + c.juiza.raciocinio_tokens),
             "nota_flash": c.nota_flash, "nota_lite": c.nota_lite, "vencedor": c.vencedor, "lite_ok": c.lite_ok,
             "motivo_juiza": c.motivo, "resposta_flash": rf.texto, "resposta_lite": rl.texto,

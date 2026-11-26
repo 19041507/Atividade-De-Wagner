@@ -18,7 +18,9 @@ def modelos(config, chave: str) -> dict:
     lite = config("GEMINI_MODEL_LITE") or ia.escolher_reserva(chave, flash)
     if not lite:
         raise RuntimeError("Nenhum modelo Flash-Lite disponível na chave. Defina GEMINI_MODEL_LITE.")
-    return {"flash": flash, "lite": lite}
+    # Sem Pro na chave, o próprio Flash julga (com o risco de preferir o próprio estilo).
+    juiza = config("GEMINI_MODEL_JUIZA") or ia.escolher_juiza(chave) or flash
+    return {"flash": flash, "lite": lite, "juiza": juiza}
 
 
 def precos(config) -> dict:
@@ -77,13 +79,13 @@ def auditar(banco: Banco, id_: str, conversa: list[dict], reg: dict, modelos_: d
     try:
         alt = ia.conversar(conversa, chave, modelos_[outro], INSTRUCAO)
         lite, flash = (reg["resposta"], alt.texto) if rota == "lite" else (alt.texto, reg["resposta"])
-        c = ia.comparar(reg["pedido"], lite, flash, chave, modelos_["flash"], lite_e_a=random.random() < 0.5)
+        c = ia.comparar(reg["pedido"], lite, flash, chave, modelos_["juiza"], lite_e_a=random.random() < 0.5)
         banco.atualizar(id_, {
             "auditado": True, "modelo_alt": alt.modelo, "resposta_alt": alt.texto,
             "custo_alt": piloto.custo(precos_[outro], alt.prompt_tokens, alt.resposta_tokens + alt.raciocinio_tokens),
             "nota_lite": c.nota_lite, "nota_flash": c.nota_flash, "vencedor": c.vencedor, "lite_ok": c.lite_ok,
             "motivo_juiza": c.motivo,
-            "custo_juiza": piloto.custo(precos_["flash"], c.juiza.prompt_tokens,
+            "custo_juiza": piloto.custo(precos_["juiza"], c.juiza.prompt_tokens,
                                         c.juiza.resposta_tokens + c.juiza.raciocinio_tokens),
         })
     except Exception:

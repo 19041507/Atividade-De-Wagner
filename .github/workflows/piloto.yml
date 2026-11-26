@@ -44,6 +44,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GEMINI_MODEL_LITE: ${{ vars.GEMINI_MODEL_LITE }}
+          GEMINI_MODEL_JUIZA: ${{ vars.GEMINI_MODEL_JUIZA }}
         run: python rodar_piloto.py --n ${{ inputs.pedidos || vars.PILOTO_PEDIDOS || 50 }} --pausa 12 --orcamento ${{ vars.PILOTO_ORCAMENTO || 0.50 }} ${{ inputs.forcar && '--forcar' || '' }}
 
       - name: Salva o resultado no repositório

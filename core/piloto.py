@@ -18,7 +18,7 @@ from core.modelo import IDIOMAS, ModeloTokens, features_do_texto
 
 COLUNAS = (["log_prompt_tokens", "tem_codigo", "perguntas", "log_p10", "log_mediana", "log_p90"]
            + ["idioma_" + l for l in IDIOMAS])
-PRECOS_PADRAO = {"flash": (0.30, 2.50), "lite": (0.10, 0.40)}  # US$ por 1M tokens (entrada, saída)
+PRECOS_PADRAO = {"flash": (0.30, 2.50), "lite": (0.10, 0.40), "juiza": (1.25, 10.00)}  # US$ por 1M tokens (entrada, saída)
 
 
 def caracteristicas(texto: str, lang: str, modelo: ModeloTokens):

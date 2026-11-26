@@ -514,7 +514,9 @@ if secao == "Bastidores":
 
           <div class="passo"><div><span class="quemfaz gem">Gemini · juíza</span><h4>Auditoria em amostra</h4>
             <p>Em 1 de cada 5 perguntas, depois que o usuário já recebeu a resposta, o outro modelo também responde e
-            uma IA juíza compara as duas às cegas. O usuário também avalia com 👍/👎.</p></div>
+            uma IA juíza compara as duas às cegas. A juíza é o <b>{MODELOS["juiza"] if online else "Gemini Pro"}</b>:
+            maior que os dois modelos avaliados e diferente deles, para não julgar a si mesma. O usuário também
+            avalia com 👍/👎.</p></div>
             <div class="formula">Lite deu conta = juíza disse "empate"
                   ou preferiu o Lite</div></div>
 
@@ -671,7 +673,7 @@ e pedidos do teste controlado. O uso real vem das perguntas feitas no assistente
 - No uso real, a qualidade é estimada por uma amostra aleatória auditada.
 
 #### Limitações
-- A juíza é do mesmo fornecedor dos modelos avaliados.
+- A juíza é do mesmo fornecedor dos modelos avaliados (mas é um modelo maior e diferente deles).
 - Quando o Lite responde e não é auditado, o custo do Flash é estimado.
 - Os preços por token são de tabela e mudam com o tempo.
 """)

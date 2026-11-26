@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 TIMEOUT_MS = 40_000                  # sem receber nada nesse tempo, a tentativa é abandonada
+TIMEOUT_JUIZA_MS = 120_000          # o Pro raciocina antes de começar a responder
 PRAZO_PARA_NOVA_TENTATIVA = 45       # segundos: depois disso, não vale fazer a pessoa esperar mais
 TRANSITORIOS = {429, 500, 503, 504}  # sobrecarga ou limite: vale tentar de novo
 ESPERAS = [2, 5]                     # segundos entre as tentativas
@@ -24,12 +25,12 @@ class RespostaIA:
     modelo: str
 
 
-def _cliente(chave: str):
+def _cliente(chave: str, timeout_ms: int = TIMEOUT_MS):
     # O chamador precisa guardar o cliente numa variável: se ele for descartado,
     # a biblioteca fecha a conexão antes da requisição sair.
     from google import genai
     from google.genai import types
-    return genai.Client(api_key=chave, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
+    return genai.Client(api_key=chave, http_options=types.HttpOptions(timeout=timeout_ms))
 
 
 def _transitorio(e: Exception) -> bool:
@@ -67,9 +68,26 @@ def escolher_reserva(chave: str, principal: str) -> str | None:
     return sorted(candidatos, key=ordem)[0]
 
 
+def escolher_juiza(chave: str) -> str | None:
+    """A juíza deve ser maior que os dois modelos avaliados e diferente deles: o Pro mais recente da chave."""
+    import re
+    cliente = _cliente(chave)
+    nomes = [m.name.removeprefix("models/") for m in cliente.models.list()
+             if "generateContent" in (m.supported_actions or [])]
+    excluir = ("tts", "image", "live", "audio", "embedding", "exp", "computer")
+    candidatos = [n for n in nomes if "pro" in n and not any(x in n for x in excluir)]
+    if not candidatos:
+        return None
+
+    def ordem(n):
+        versao = re.search(r"(\d+(?:\.\d+)?)", n)
+        return ("preview" in n, -float(versao.group(1)) if versao else 0, len(n))
+    return sorted(candidatos, key=ordem)[0]
+
+
 def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
               reserva: str | None = None, ao_receber: Callable[[str], None] | None = None,
-              esquema_json: dict | None = None) -> RespostaIA:
+              esquema_json: dict | None = None, timeout_ms: int = TIMEOUT_MS) -> RespostaIA:
     """Gera a resposta em streaming: ao_receber é chamado com o texto acumulado a cada pedaço.
 
     mensagens: [{"papel": "user" | "model", "texto": str}, ...], a última é a pergunta atual.
@@ -79,7 +97,7 @@ def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
     """
     from google.genai import types
     contents = [types.Content(role=m["papel"], parts=[types.Part(text=m["texto"])]) for m in mensagens]
-    cliente = _cliente(chave)
+    cliente = _cliente(chave, timeout_ms)
     fila = [modelo] * (len(ESPERAS) + 1)
     reserva_pendente = bool(reserva) and reserva != modelo
     pensar_pouco, esperas = True, iter(ESPERAS)
@@ -167,7 +185,7 @@ def julgar(pedido: str, resposta_a: str, resposta_b: str, chave: str, modelo: st
     import json
     texto = f"PEDIDO:\n{pedido}\n\nRESPOSTA A:\n{resposta_a}\n\nRESPOSTA B:\n{resposta_b}"
     r = conversar([{"papel": "user", "texto": texto}], chave, modelo, INSTRUCAO_JUIZA,
-                  reserva=reserva, esquema_json=ESQUEMA_JUIZA)
+                  reserva=reserva, esquema_json=ESQUEMA_JUIZA, timeout_ms=TIMEOUT_JUIZA_MS)
     v = json.loads(r.texto)
     return Veredito(int(v["nota_a"]), int(v["nota_b"]), v["melhor"], v["motivo"], r)
 
