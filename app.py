@@ -189,7 +189,7 @@ def config(nome, padrao=None):
 
 
 CHAVE = config("GEMINI_API_KEY")
-LIMITE_SESSAO = int(config("LIMITE_SESSAO", 20))
+LIMITE_SESSAO = int(config("LIMITE_SESSAO", 20))  # perguntas por pessoa (código no link) por dia
 LIMITE_DIA = int(config("LIMITE_DIA", 300))
 ORCAMENTO_DIA = float(config("ORCAMENTO_DIA", 1.00))  # US$: passou disso, só o Lite até o dia seguinte
 MAX_TOKENS_RESPOSTA = int(config("MAX_TOKENS_RESPOSTA", 2048))  # teto de saída por resposta (inclui raciocínio)
@@ -298,21 +298,57 @@ def rodape(m):
     partes = [f'<b class="{m["rota"]}">{m["rota"].capitalize()}</b>', m["motivo"], f'<b>{usd(m["custo"])}</b>']
     if m["rota"] == "lite":
         partes.append(f'o Flash custaria ~{usd(m["custo_flash"])} (−{pct(economia)})')
-    partes.append(f'{br(m["segundos"], 1)} s')
+    if m.get("segundos"):
+        partes.append(f'{br(m["segundos"], 1)} s')
     if m.get("cortada"):
         partes.append(f'cortada no limite de {br(MAX_TOKENS_RESPOSTA)} tokens')
     st.html(f'<div class="etiquetas conta">{"".join(f"<span>{p}</span>" for p in partes)}</div>')
     if m.get("id"):
-        st.feedback("thumbs", key=f"fb_{m['id']}", on_change=salvar_feedback, args=(m["id"],))
+        padrao = {1: 1, -1: 0}.get(m.get("feedback"))
+        st.feedback("thumbs", key=f"fb_{m['id']}", default=padrao, on_change=salvar_feedback, args=(m["id"],))
+
+
+def novo_codigo():
+    return uuid.uuid4().hex[:12]
+
+
+def conversa_do_banco(sessao: str) -> list[dict]:
+    """Reabre uma conversa a partir do banco: cada linha é uma pergunta e a resposta entregue."""
+    if reais.empty:
+        return []
+    msgs = []
+    for r in reais[reais.sessao == sessao].sort_values("criado_em").itertuples():
+        msgs.append({"papel": "user", "texto": r.pedido})
+        msgs.append({"papel": "model", "texto": r.resposta, "id": r.id, "rota": r.rota, "motivo": r.motivo,
+                     "custo": r.custo, "custo_flash": r.custo_flash_estimado if r.rota == "lite" else r.custo,
+                     "feedback": None if pd.isna(r.feedback) else int(r.feedback)})
+    return msgs
+
+
+def abrir_conversa(codigo: str):
+    st.query_params["c"] = codigo
+    st.session_state.pop("conversa_aberta", None)
 
 
 # ---------- Assistente ----------
 if secao == "Assistente":
-    st.session_state.setdefault("conversa", [])
-    st.session_state.setdefault("sessao", uuid.uuid4().hex)
+    # Sem login: o código do usuário (u) e o da conversa (c) ficam no endereço da página.
+    # Guardar o link nos favoritos guarda as conversas; quem tiver o link também as vê.
+    if "u" not in st.query_params:
+        st.query_params["u"] = novo_codigo()
+    if "c" not in st.query_params:
+        st.query_params["c"] = novo_codigo()
+    usuario, codigo = st.query_params["u"], st.query_params["c"]
+    sessao = f"{usuario}/{codigo}"
+    if st.session_state.get("conversa_aberta") != sessao:
+        st.session_state.conversa = conversa_do_banco(sessao)
+        st.session_state.conversa_aberta = sessao
+
     gasto_hoje, pedidos_hoje = producao.gasto_e_contagem_hoje(reais)
-    enviadas = sum(m["papel"] == "user" for m in st.session_state.conversa)
-    restante = LIMITE_SESSAO - enviadas
+    meus = reais[reais.sessao.fillna("").str.startswith(f"{usuario}/")] if not reais.empty else reais
+    _, minhas_hoje = producao.gasto_e_contagem_hoje(meus)
+    minhas_hoje = max(minhas_hoje, sum(m["papel"] == "user" for m in st.session_state.conversa if not m.get("id")))
+    restante = LIMITE_SESSAO - minhas_hoje
     if erro_ia:
         st.warning(f"O Gemini recusou a conexão: {erro_ia}")
     elif not CHAVE:
@@ -323,7 +359,21 @@ if secao == "Assistente":
         st.warning(f"Não consegui ler o banco: {erro_banco}")
     bloqueado = not online or restante <= 0 or pedidos_hoje >= LIMITE_DIA
 
-    col_chat, col_lado = st.columns([2.3, 1], gap="large")
+    col_lista, col_chat, col_lado = st.columns([0.9, 2.4, 1], gap="large")
+    with col_lista:
+        st.button("+ Nova conversa", on_click=abrir_conversa, args=(novo_codigo(),), width="stretch")
+        if not meus.empty:
+            conversas = (meus.sort_values("criado_em").groupby("sessao")
+                         .agg(titulo=("pedido", "first"), ultima=("criado_em", "max"))
+                         .sort_values("ultima", ascending=False))
+            st.html('<span class="rotulo" style="margin-top:1rem">Suas conversas</span>')
+            for sess, c in conversas.head(30).iterrows():
+                atual = sess == sessao
+                st.button(c.titulo[:42] + ("…" if len(c.titulo) > 42 else ""), key=f"conv_{sess}",
+                          type="secondary" if atual else "tertiary", disabled=atual, width="stretch",
+                          on_click=abrir_conversa, args=(sess.split("/", 1)[1],))
+            st.caption("Salve o link desta página para voltar às suas conversas.")
+
     with col_lado:
         da_conversa = [m for m in st.session_state.conversa if m["papel"] == "model"]
         pago = sum(m["custo"] for m in da_conversa)
@@ -337,8 +387,8 @@ if secao == "Assistente":
           <span class="rotulo" style="margin-top:1.2rem">Hoje, todos os usuários</span>
           <div class="l"><span>pedidos</span><b>{pedidos_hoje} de {LIMITE_DIA}</b></div>
           <div class="l"><span>gasto</span><b>{usd(gasto_hoje)} de {usd(ORCAMENTO_DIA)}</b></div>
-          <p>{restante} mensagens restantes nesta sessão. As perguntas ficam guardadas para medir e treinar o
-          piloto: não envie dados pessoais.</p>
+          <p>Você ainda pode fazer {max(restante, 0)} perguntas hoje. As perguntas ficam guardadas para medir e
+          treinar o piloto: não envie dados pessoais.</p>
         </div>""")
 
     with col_chat:
@@ -353,7 +403,7 @@ if secao == "Assistente":
                     if m["papel"] == "model":
                         rodape(m)
         pergunta = st.chat_input(
-            "Escreva sua pergunta…" if restante > 0 else "Limite de mensagens desta sessão atingido",
+            "Escreva sua pergunta…" if restante > 0 else "Você atingiu o limite de perguntas de hoje",
             disabled=bloqueado)
 
     if pergunta and not bloqueado:
@@ -382,7 +432,7 @@ if secao == "Assistente":
                     else:
                         st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
                 else:
-                    reg = producao.registro(st.session_state.sessao, pergunta, d, r, MODELOS, PRECOS,
+                    reg = producao.registro(sessao, pergunta, d, r, MODELOS, PRECOS,
                                             piloto.razao_flash_lite(hist), rot.versao, MAX_TOKENS_RESPOSTA)
                     id_ = None
                     if banco:
