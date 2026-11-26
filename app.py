@@ -1,9 +1,14 @@
+import os
+import threading
+import uuid
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import piloto
+from core import ia, piloto, producao
+from core.banco import conectar
 from core.modelo import DADOS, NOMES_IDIOMAS, ModeloTokens
 
 st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
@@ -12,8 +17,8 @@ TINTA, MUDO, LINHA, PAPEL = "#161616", "#6B6A65", "#E3E1DA", "#F7F6F2"
 DESTAQUE, BOM, RUIM, CINZA = "#C2410C", "#3F6B4E", "#A33A2B", "#B8B5AC"
 EXECUCOES = DADOS / "execucoes"
 META_ECONOMIA, META_QUALIDADE, META_CONCORDANCIA = 0.30, 0.90, 0.80
-PRECO_IN, PRECO_OUT = piloto.PRECOS_PADRAO["flash"]
-CORES_ESTRATEGIA = {"Sempre Flash": CINZA, "Sempre Lite": CINZA, "Piloto automático": DESTAQUE, "Escolha perfeita": TINTA}
+CORES_ESTRATEGIA = {"Sempre Flash": CINZA, "Sempre Lite": CINZA, "Regra fixa": MUDO, "Piloto automático": DESTAQUE,
+                    "Escolha perfeita": TINTA}
 
 st.html("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,6 +117,25 @@ button[kind="segmented_control"] p, button[kind="segmented_controlActive"] p { f
 .formula { font-family: var(--mono); font-size:.8rem; color: var(--tinta); background:#FFFEFB; border:1px solid var(--linha);
   padding:.75rem .9rem; line-height:1.75; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
 .formula i { color: var(--mudo); font-style: normal; }
+
+/* assistente */
+div[data-testid="stChatMessageAvatarUser"], div[data-testid="stChatMessageAvatarAssistant"] { display:none; }
+div[data-testid="stChatMessage"] { background: transparent; padding: .2rem 0 1.2rem; gap: 0; animation: surge .35s ease both; }
+div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { padding-bottom: .6rem; }
+div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) div[data-testid="stChatMessageContent"] {
+  background:#EDEBE4; border-radius: 4px 14px 14px 14px; padding: .65rem .95rem; width: fit-content; max-width: 85%; }
+div[data-testid="stChatMessageContent"] p, div[data-testid="stChatMessageContent"] li { font-size: 1rem; line-height: 1.65; color: var(--tinta); }
+div[data-testid="stChatInput"] { background:#fff; border:1px solid var(--linha); border-radius: 10px; box-shadow: none; }
+div[data-testid="stChatInput"]:focus-within { border-color: var(--tinta); }
+.etiquetas.conta { margin: .7rem 0 .3rem; padding-top:.55rem; border-top:1px dashed var(--linha); }
+.comeco h3 { font-family: var(--serif) !important; font-weight:400; font-size: 2rem; color: var(--tinta); margin: .4rem 0 .3rem; padding:0; }
+.comeco p { color: var(--mudo); margin: 0 0 1rem; }
+.lado { background:#FFFEFB; border:1px solid var(--linha); padding: 1.1rem 1.2rem; font-size:.85rem; color:#3A3935; }
+.lado .rotulo { margin-bottom:.4rem; }
+.lado .l { display:flex; justify-content:space-between; gap:1rem; padding:.3rem 0; border-bottom:1px dotted var(--linha); }
+.lado .l b { font-family: var(--mono); font-weight:500; color: var(--tinta); font-variant-numeric: tabular-nums; }
+.lado p { color: var(--mudo); font-size:.78rem; line-height:1.55; margin:1rem 0 0; }
+.lado .rotulo + .l { border-top:1px solid var(--tinta); }
 </style>
 """)
 
@@ -156,6 +180,22 @@ def secao_titulo(titulo, texto):
     st.html(f'<div class="secao"><h2>{titulo}</h2><p>{texto}</p></div>')
 
 
+def config(nome, padrao=None):
+    try:
+        v = st.secrets.get(nome)
+    except Exception:
+        v = None
+    return v if v not in (None, "") else os.environ.get(nome, padrao)
+
+
+CHAVE = config("GEMINI_API_KEY")
+LIMITE_SESSAO = int(config("LIMITE_SESSAO", 20))
+LIMITE_DIA = int(config("LIMITE_DIA", 300))
+ORCAMENTO_DIA = float(config("ORCAMENTO_DIA", 1.00))  # US$: passou disso, só o Lite até o dia seguinte
+PRECOS = producao.precos(config)
+banco = conectar(config("SUPABASE_URL"), config("SUPABASE_KEY"))
+
+
 @st.cache_resource(show_spinner="Carregando o previsor treinado com 18.924 conversas reais…")
 def carregar_modelo():
     return ModeloTokens()
@@ -166,14 +206,14 @@ def carregar_execucoes():
     return piloto.carregar_historico(EXECUCOES), piloto.Roteador.carregar(EXECUCOES / "roteador.json")
 
 
-@st.cache_data(show_spinner=False)
-def carregar_validacao():
-    caminho = DADOS / "validacao_humana.csv"
-    if not caminho.exists():
-        return None
-    v = pd.read_csv(caminho, dtype=str).fillna("")
-    v = v[v.sua_escolha.str.strip().str.upper().isin(["A", "B", "EMPATE"])]
-    return v if len(v) else None
+@st.cache_data(ttl=30, show_spinner=False)
+def carregar_reais():
+    return banco.listar() if banco else pd.DataFrame()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def carregar_modelos(_chave):
+    return producao.modelos(config, _chave)
 
 
 @st.cache_resource(show_spinner="Calculando a regra inicial…")
@@ -181,82 +221,239 @@ def roteador_inicial(_modelo):
     return piloto.regra_inicial(_modelo, pd.read_csv(DADOS / "fila_pedidos.csv"))
 
 
+def ultimo_diario():
+    arquivos = sorted(EXECUCOES.glob("????-??-??*.md"))
+    return (arquivos[-1].stem, arquivos[-1].read_text()) if arquivos else None
+
+
 modelo = carregar_modelo()
 hist, roteador = carregar_execucoes()
-tem_dados = not hist.empty
-if tem_dados:
-    aval = piloto.avaliar(hist)
+rot = roteador or roteador_inicial(modelo)
+tem_controle = not hist.empty
+erro_banco = None
+try:
+    reais = carregar_reais()
+except Exception as e:
+    reais, erro_banco = pd.DataFrame(), str(e)[:200]
+real = producao.resumo_real(reais)
+MODELOS, erro_ia = None, None
+if CHAVE:
+    try:
+        MODELOS = carregar_modelos(CHAVE)
+    except Exception as e:
+        erro_ia = str(e)[:200]
+online = MODELOS is not None
+
+if tem_controle:
+    aval = piloto.avaliar(hist, rot.limiar_p90)
     pil = aval.loc["Piloto automático"]
-    rodadas = hist.groupby("data").apply(
-        lambda d: pd.concat([piloto.avaliar(d).loc["Piloto automático"],
-                             pd.Series({"pedidos": len(d), "versao": int(d.versao_roteador.iloc[0])})]),
-        include_groups=False).reset_index()
 
-concordancia = None
-validacao = carregar_validacao()
-if validacao is not None and tem_dados:
-    juiza = hist.set_index("id").vencedor
-    escolha = validacao.sua_escolha.str.strip().str.upper()
-    humano = np.where(escolha == "EMPATE", "empate",
-                      np.where((escolha == "A") == (validacao.gabarito_a == "lite"), "lite", "flash"))
-    # o que importa para o roteador: o Lite deu conta (empate ou melhor) ou não
-    acordo = (humano != "flash") == (juiza.reindex(validacao.id).values != "flash")
-    concordancia = (float(np.mean(acordo)), len(validacao))
+# A manchete usa o uso real quando existe; antes disso, o teste controlado.
+if real and real["pedidos"] >= 10:
+    manchete = {"economia": real["economia"], "qualidade": real["qualidade"], "pedidos": real["pedidos"], "fonte": "uso real"}
+elif tem_controle:
+    manchete = {"economia": pil.economia, "qualidade": pil.qualidade, "pedidos": len(hist), "fonte": "teste controlado"}
+else:
+    manchete = None
 
-ultima = f'última rodada {pd.to_datetime(hist.data.max()):%d/%m} · roteador v{roteador.versao}' if tem_dados else "aguardando a primeira rodada"
+status = (f"roteador {'regra' if rot.tipo == 'regra' else 'v' + str(rot.versao)} · "
+          f"{MODELOS['lite'] + ' / ' + MODELOS['flash'] if online else 'Gemini indisponível'}")
 st.html(f"""
 <div class="topo">
   <div class="marca">TokenScope<small>piloto automático de custo de IA</small></div>
-  <div class="status"><i style="background:{BOM if tem_dados else CINZA}"></i>{ultima}</div>
+  <div class="status"><i style="background:{BOM if online else RUIM}"></i>{status}</div>
 </div>
 <div class="abre">
   <div>
     <h1>A IA escolhe o modelo. <em>Você paga menos.</em></h1>
-    <p>Todo dia, sem ninguém clicar, o piloto recebe pedidos reais e decide, para cada um, entre o Gemini Flash-Lite
-    (barato) e o Flash (mais capaz). Uma segunda IA confere se a qualidade se manteve, e o piloto aprende com as notas.</p>
+    <p>Um assistente em que cada pergunta é roteada sozinha para o Gemini Flash-Lite (barato) ou para o Flash
+    (mais capaz). Uma segunda IA audita uma amostra das respostas, e o piloto se retreina todo dia com o que aprendeu.</p>
   </div>
   <div class="numeros">
-    <div><span class="rotulo">Pedidos atendidos</span><b>{br(len(hist)) if tem_dados else "–"}</b></div>
-    <div><span class="rotulo">Economia</span><b>{pct(pil.economia) if tem_dados else "–"}</b></div>
-    <div><span class="rotulo">Qualidade</span><b>{pct(pil.qualidade) if tem_dados else "–"}</b></div>
+    <div><span class="rotulo">Economia</span><b>{pct(manchete["economia"]) if manchete else "–"}</b></div>
+    <div><span class="rotulo">Qualidade</span><b>{pct(manchete["qualidade"]) if manchete and manchete["qualidade"] is not None else "–"}</b></div>
+    <div><span class="rotulo">Pedidos</span><b>{br(manchete["pedidos"]) if manchete else "–"}</b></div>
   </div>
 </div>
 """)
 
-SECOES = {"Resultado": "Resultado", "Rodadas": "Rodadas", "Decisoes": "Decisões", "Como": "Como funciona",
-          "Previsor": "O previsor de tokens", "Sobre": "Sobre"}
-secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Resultado",
-                             key="secao", label_visibility="collapsed") or "Resultado"
+SECOES = {"Assistente": "Assistente", "Resultados": "Resultados", "Bastidores": "Bastidores"}
+secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Assistente",
+                             key="secao", label_visibility="collapsed") or "Assistente"
 
 
-def sem_dados():
-    st.html('<div class="vazio"><h3>A primeira rodada ainda não aconteceu.</h3>'
-            'O piloto roda uma vez por dia pelo GitHub Actions. Assim que terminar, os resultados aparecem aqui.</div>')
+def salvar_feedback(id_):
+    valor = st.session_state.get(f"fb_{id_}")
+    if banco and valor is not None:
+        try:
+            banco.atualizar(id_, {"feedback": 1 if valor == 1 else -1})
+            carregar_reais.clear()
+        except Exception:
+            st.toast("Não consegui salvar a avaliação.")
 
 
-# ---------- Resultado ----------
-if secao == "Resultado":
-    secao_titulo("O resultado", "Os mesmos pedidos, quatro jeitos de escolher o modelo. Para medir cada um, o sistema gera "
-                 "as duas respostas em todos os pedidos e a IA juíza compara: assim sabemos o que teria acontecido "
-                 "com qualquer escolha.")
-    if not tem_dados:
-        sem_dados()
-    else:
-        flash = aval.loc["Sempre Flash"]
+def rodape(m):
+    economia = 1 - m["custo"] / m["custo_flash"] if m["custo_flash"] else 0
+    partes = [f'<b class="{m["rota"]}">{m["rota"].capitalize()}</b>', m["motivo"], f'<b>{usd(m["custo"])}</b>']
+    if m["rota"] == "lite":
+        partes.append(f'o Flash custaria ~{usd(m["custo_flash"])} (−{pct(economia)})')
+    partes.append(f'{br(m["segundos"], 1)} s')
+    st.html(f'<div class="etiquetas conta">{"".join(f"<span>{p}</span>" for p in partes)}</div>')
+    if m.get("id"):
+        st.feedback("thumbs", key=f"fb_{m['id']}", on_change=salvar_feedback, args=(m["id"],))
+
+
+# ---------- Assistente ----------
+if secao == "Assistente":
+    st.session_state.setdefault("conversa", [])
+    st.session_state.setdefault("sessao", uuid.uuid4().hex)
+    gasto_hoje, pedidos_hoje = producao.gasto_e_contagem_hoje(reais)
+    enviadas = sum(m["papel"] == "user" for m in st.session_state.conversa)
+    restante = LIMITE_SESSAO - enviadas
+    if erro_ia:
+        st.warning(f"O Gemini recusou a conexão: {erro_ia}")
+    elif not CHAVE:
+        st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
+    if not banco:
+        st.info("O banco (Supabase) não está configurado: o assistente responde, mas nada é medido nem guardado.")
+    elif erro_banco:
+        st.warning(f"Não consegui ler o banco: {erro_banco}")
+    bloqueado = not online or restante <= 0 or pedidos_hoje >= LIMITE_DIA
+
+    col_chat, col_lado = st.columns([2.3, 1], gap="large")
+    with col_lado:
+        da_conversa = [m for m in st.session_state.conversa if m["papel"] == "model"]
+        pago = sum(m["custo"] for m in da_conversa)
+        flash = sum(m["custo_flash"] for m in da_conversa)
+        st.html(f"""<div class="lado">
+          <span class="rotulo">Nesta conversa</span>
+          <div class="l"><span>respostas</span><b>{len(da_conversa)}</b></div>
+          <div class="l"><span>no Lite</span><b>{sum(m["rota"] == "lite" for m in da_conversa)}</b></div>
+          <div class="l"><span>pago</span><b>{usd(pago)}</b></div>
+          <div class="l"><span>se fosse tudo Flash</span><b>{usd(flash)}</b></div>
+          <span class="rotulo" style="margin-top:1.2rem">Hoje, todos os usuários</span>
+          <div class="l"><span>pedidos</span><b>{pedidos_hoje} de {LIMITE_DIA}</b></div>
+          <div class="l"><span>gasto</span><b>{usd(gasto_hoje)} de {usd(ORCAMENTO_DIA)}</b></div>
+          <p>{restante} mensagens restantes nesta sessão. As perguntas ficam guardadas para medir e treinar o
+          piloto: não envie dados pessoais.</p>
+        </div>""")
+
+    with col_chat:
+        caixa = st.container()
+        with caixa:
+            if not st.session_state.conversa:
+                st.html('<div class="comeco"><h3>Pergunte qualquer coisa.</h3>'
+                        '<p>O piloto escolhe o modelo, e você vê qual respondeu, por quê e quanto custou.</p></div>')
+            for m in st.session_state.conversa:
+                with st.chat_message("user" if m["papel"] == "user" else "assistant"):
+                    st.markdown(m["texto"])
+                    if m["papel"] == "model":
+                        rodape(m)
+        pergunta = st.chat_input(
+            "Escreva sua pergunta…" if restante > 0 else "Limite de mensagens desta sessão atingido",
+            disabled=bloqueado)
+
+    if pergunta and not bloqueado:
+        conversa = st.session_state.conversa
+        d = producao.decidir(pergunta, rot, modelo, gasto_hoje, ORCAMENTO_DIA)
+        conversa.append({"papel": "user", "texto": pergunta})
+        mensagens = [{"papel": m["papel"], "texto": m["texto"]} for m in conversa]
+        with caixa:
+            with st.chat_message("user"):
+                st.markdown(pergunta)
+            with st.chat_message("assistant"):
+                saida = st.empty()
+                saida.markdown(f"_Piloto: **{d.rota.capitalize()}** · {d.motivo}_")
+                outro = "flash" if d.rota == "lite" else "lite"
+                try:
+                    r = ia.conversar(mensagens, CHAVE, MODELOS[d.rota], producao.INSTRUCAO, reserva=MODELOS[outro],
+                                     ao_receber=lambda t: saida.markdown(t + " ▍"))
+                except Exception as e:
+                    conversa.pop()
+                    saida.empty()
+                    if "429" in str(e):
+                        st.warning("A cota da chave do Gemini acabou por agora. Tente de novo mais tarde.")
+                    elif isinstance(e, ia.GeminiIndisponivel):
+                        st.warning("O Gemini não respondeu a tempo (instabilidade do Google). Envie de novo em alguns segundos.")
+                    else:
+                        st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
+                else:
+                    reg = producao.registro(st.session_state.sessao, pergunta, d, r, MODELOS, PRECOS,
+                                            piloto.razao_flash_lite(hist), rot.versao)
+                    id_ = None
+                    if banco:
+                        try:
+                            id_ = banco.inserir(reg)
+                            carregar_reais.clear()
+                        except Exception as e:
+                            st.caption(f"Resposta não registrada no banco: {str(e)[:120]}")
+                    if id_ and not reg["forcado"] and producao.amostra_auditoria():
+                        threading.Thread(target=producao.auditar, daemon=True,
+                                         args=(banco, id_, mensagens, reg, MODELOS, PRECOS, CHAVE)).start()
+                    conversa.append({"papel": "model", "texto": r.texto, "id": id_, "rota": reg["rota"],
+                                     "motivo": reg["motivo"], "custo": reg["custo"],
+                                     "custo_flash": reg["custo_flash_estimado"], "segundos": r.segundos})
+                    st.rerun()
+
+# ---------- Resultados ----------
+if secao == "Resultados":
+    if real:
+        eco_ic, qual_ic = producao.bootstrap_real(reais)
+        secao_titulo("Em uso real", f"{br(real['pedidos'])} perguntas de usuários, cada uma roteada pelo piloto. "
+                     f"O piloto pagou {usd(real['custo'])}; usando sempre o Flash, seriam {usd(real['custo_flash'])}.")
         faixa([
-            ("Economia", pct(pil.economia), "sobre usar sempre o Flash", True),
-            ("Qualidade", pct(pil.qualidade), "pedidos tão bem atendidos quanto pelo Flash", False),
-            ("Pedidos no Lite", pct(pil.lite), "o resto foi para o Flash", False),
-            ("Custo", usd(pil.custo), f"sempre Flash: {usd(flash.custo)}", False),
+            ("Economia", pct(real["economia"]), f"IC 95%: {pct(eco_ic[0])} a {pct(eco_ic[1])}", True),
+            ("Qualidade", pct(real["qualidade"]) if real["qualidade"] is not None else "–",
+             (f"IC 95%: {pct(qual_ic[0])} a {pct(qual_ic[1])} · " if qual_ic else "")
+             + f"{real['auditados']} respostas auditadas", False),
+            ("Aprovação", pct(real["aprovacao"]) if real["aprovacao"] is not None else "–",
+             f"👍 em {real['feedback']} avaliações de usuários", False),
+            ("No Lite", pct(real["lite"]), "o resto foi para o Flash", False),
         ])
+    elif tem_controle:
+        secao_titulo("Resultados", "Ainda não há uso real suficiente; os números abaixo vêm do teste controlado diário.")
+    else:
+        secao_titulo("Resultados", "")
+        st.html('<div class="vazio"><h3>Ainda não há resultados.</h3>Use o assistente ou aguarde a primeira rodada '
+                'do teste controlado, que roda todo dia pelo GitHub Actions.</div>')
+
+    # Projeção: custo por pedido do uso real quando há volume; senão, do teste controlado.
+    if (real and real["pedidos"] >= 10) or tem_controle:
+        if real and real["pedidos"] >= 10:
+            c_pil, c_fla, fonte = reais.custo.values, piloto.custo_flash_real(reais), "do uso real"
+        else:
+            c_pil = np.where(hist.rota == "lite", hist.custo_lite, hist.custo_flash)
+            c_fla, fonte = hist.custo_flash.values, "do teste controlado"
+        volumes = {10_000: "10 mil", 100_000: "100 mil", 1_000_000: "1 milhão"}
+        g1, g2 = st.columns([1, 1.3], gap="large")
+        with g1:
+            titulo_grafico("Quanto uma empresa economizaria", f"Monte Carlo com o custo de cada pedido {fonte}")
+            volume = st.segmented_control("Pedidos por mês", list(volumes), format_func=lambda v: f"{volumes[v]}/mês",
+                                          default=1_000_000, key="volume") or 1_000_000
+            proj = piloto.projetar(np.asarray(c_pil, float), np.asarray(c_fla, float), volume)
+            p5, p50, p95 = np.percentile(proj, [5, 50, 95])
+            st.html(f'<div class="faixa"><div><span class="rotulo">Economia por mês</span><b class="acento">'
+                    f'{usd(p50)}</b><small>90% das simulações entre {usd(p5)} e {usd(p95)}</small></div>'
+                    f'<div><span class="rotulo">Por ano</span><b>{usd(12 * p50)}</b>'
+                    f'<small>{volumes[volume]} pedidos por mês</small></div></div>')
+        with g2:
+            diario = ultimo_diario()
+            if diario:
+                titulo_grafico("Diário do piloto", f"escrito pela própria IA ao fim da rodada {diario[0]}")
+                st.html(f'<div class="nota">{diario[1]}</div>')
+
+    if tem_controle:
+        st.html('<div class="secao" style="margin-top:2rem"><h2>Teste controlado</h2><p>Todo dia, pedidos reais do '
+                'OpenAssistant recebem as duas respostas e passam pela juíza. Assim dá para comparar todas as '
+                'estratégias nos mesmos pedidos.</p></div>')
         g1, g2 = st.columns([1.3, 1], gap="large")
         with g1:
             titulo_grafico("Custo × qualidade", "o melhor lugar é em cima e à esquerda")
             fig = go.Figure()
             for nome, r in aval.iterrows():
                 fig.add_scatter(x=[r.custo], y=[100 * r.qualidade], mode="markers+text", name=nome, text=[nome],
-                                textposition="top center", marker=dict(size=16 if nome == "Piloto automático" else 11,
-                                                                       color=CORES_ESTRATEGIA[nome]),
+                                textposition="top center",
+                                marker=dict(size=16 if nome == "Piloto automático" else 11, color=CORES_ESTRATEGIA[nome]),
                                 hovertemplate=f"{nome}<br>US$ %{{x:.4f}} · %{{y:.0f}}%<extra></extra>")
             fig.add_hline(y=100 * META_QUALIDADE, line=dict(color=MUDO, dash="dot", width=1),
                           annotation_text="meta de qualidade", annotation_position="bottom right")
@@ -264,260 +461,218 @@ if secao == "Resultado":
                               yaxis_title="qualidade (%)", yaxis_range=[min(50, 100 * aval.qualidade.min() - 5), 105])
             grafico(fig)
         with g2:
-            titulo_grafico("Economia sobre usar sempre o Flash", "quanto maior, melhor")
-            fig = go.Figure(go.Bar(x=100 * aval.economia, y=aval.index, orientation="h",
-                                   marker_color=[CORES_ESTRATEGIA[n] for n in aval.index],
-                                   text=[pct(v) for v in aval.economia], textposition="outside",
-                                   hovertemplate="%{x:.1f}%<extra></extra>"))
-            fig.update_layout(xaxis=dict(visible=False, range=[0, 115]), yaxis=dict(autorange="reversed"))
-            grafico(fig, 300)
+            eco_c = piloto.intervalo(hist, lambda s: piloto.avaliar(s).loc["Piloto automático", "economia"], n=300)
+            regra = aval.loc["Regra fixa"]
+            aud = reais[reais.auditado & reais.lite_ok.notna() & reais.feedback.notna() & (reais.rota == "lite")] \
+                if not reais.empty else pd.DataFrame()
+            concordancia = float(((aud.feedback > 0) == aud.lite_ok.astype(bool)).mean()) if len(aud) >= 10 else None
 
-        def meta(texto, valor, ok):
-            simbolo, classe = ("✓", "ok") if ok else ("✕", "fora") if ok is not None else ("…", "pend")
-            return f'<div class="meta"><span class="s {classe}">{simbolo}</span><span>{texto}</span><b>{valor}</b></div>'
-        titulo_grafico("Metas definidas antes da primeira rodada")
-        st.html('<div class="metas">'
-                + meta(f"Economia de pelo menos {pct(META_ECONOMIA)} sobre sempre Flash", pct(pil.economia),
-                       pil.economia >= META_ECONOMIA)
-                + meta(f"Qualidade em pelo menos {pct(META_QUALIDADE)} dos pedidos", pct(pil.qualidade),
-                       pil.qualidade >= META_QUALIDADE)
-                + meta("Qualidade melhor que usar sempre o Lite",
-                       f"{pct(pil.qualidade)} × {pct(aval.loc['Sempre Lite'].qualidade)}",
-                       pil.qualidade > aval.loc["Sempre Lite"].qualidade)
-                + meta(f"Juíza concorda com uma pessoa em pelo menos {pct(META_CONCORDANCIA)} dos casos",
-                       f"{pct(concordancia[0])} de {concordancia[1]}" if concordancia else "aguardando avaliação",
-                       concordancia[0] >= META_CONCORDANCIA if concordancia else None)
-                + '</div>')
+            def meta(texto, valor, ok):
+                simbolo, classe = ("✓", "ok") if ok else ("✕", "fora") if ok is not None else ("…", "pend")
+                return f'<div class="meta"><span class="s {classe}">{simbolo}</span><span>{texto}</span><b>{valor}</b></div>'
+            titulo_grafico("Metas definidas antes da primeira rodada")
+            st.html('<div class="metas">'
+                    + meta(f"Economia ≥ {pct(META_ECONOMIA)} sobre sempre Flash",
+                           f"{pct(pil.economia)} ({pct(eco_c[0])}–{pct(eco_c[1])})", pil.economia >= META_ECONOMIA)
+                    + meta(f"Qualidade ≥ {pct(META_QUALIDADE)}", pct(pil.qualidade), pil.qualidade >= META_QUALIDADE)
+                    + meta("Qualidade acima de usar sempre o Lite",
+                           f"{pct(pil.qualidade)} × {pct(aval.loc['Sempre Lite'].qualidade)}",
+                           pil.qualidade > aval.loc["Sempre Lite"].qualidade)
+                    + meta("Aprender rende mais que a regra fixa",
+                           f"{pct(pil.economia)} × {pct(regra.economia)}",
+                           (pil.economia > regra.economia and pil.qualidade >= regra.qualidade) if rot.tipo == "aprendido" else None)
+                    + meta(f"Juíza concorda com os usuários em ≥ {pct(META_CONCORDANCIA)}",
+                           f"{pct(concordancia)} de {len(aud)}" if concordancia is not None else "aguardando avaliações",
+                           concordancia >= META_CONCORDANCIA if concordancia is not None else None)
+                    + '</div>')
 
-        perfeita = aval.loc["Escolha perfeita"]
-        st.html(f'<div class="nota"><b>Como ler.</b> Usar sempre o Lite é o mais barato, mas falha em '
-                f'{pct(1 - aval.loc["Sempre Lite"].qualidade)} dos pedidos. Usar sempre o Flash é o mais seguro e o mais caro. '
-                f'O piloto fica no meio: economiza {pct(pil.economia)} e mantém {pct(pil.qualidade)} de qualidade. '
-                f'A escolha perfeita, que só daria para fazer conhecendo as respostas, economizaria '
-                f'{pct(perfeita.economia)}: é o espaço que o roteador ainda pode ganhar aprendendo.</div>')
+# ---------- Bastidores ----------
+if secao == "Bastidores":
+    secao_titulo("Bastidores", "Como o piloto funciona e todos os dados por trás dos resultados.")
 
-# ---------- Rodadas ----------
-if secao == "Rodadas":
-    secao_titulo("Rodada a rodada", "Cada rodada usa o roteador treinado com todas as notas anteriores. "
-                 "A primeira usa uma regra simples; a partir de 40 vereditos, ele passa a aprender.")
-    if not tem_dados:
-        sem_dados()
-    else:
-        datas = pd.to_datetime(rodadas.data).dt.strftime("%d/%m")
-        titulo_grafico("Economia e qualidade do piloto", "a linha pontilhada é a meta de qualidade")
-        fig = go.Figure()
-        fig.add_scatter(x=datas, y=100 * rodadas.qualidade, mode="lines+markers", name="qualidade",
-                        line=dict(color=TINTA, width=2))
-        fig.add_scatter(x=datas, y=100 * rodadas.economia, mode="lines+markers", name="economia",
-                        line=dict(color=DESTAQUE, width=2))
-        fig.add_hline(y=100 * META_QUALIDADE, line=dict(color=MUDO, dash="dot", width=1))
-        fig.update_layout(yaxis_title="%", yaxis_range=[0, 105], xaxis_type="category")
-        grafico(fig)
-
-        tabela = pd.DataFrame({
-            "Rodada": datas, "Pedidos": rodadas.pedidos.astype(int),
-            "Roteador": ["regra" if v == 0 else f"v{int(v)}" for v in rodadas.versao],
-            "No Lite": (100 * rodadas.lite).round(0).astype(int).astype(str) + "%",
-            "Economia": (100 * rodadas.economia).round(0).astype(int).astype(str) + "%",
-            "Qualidade": (100 * rodadas.qualidade).round(0).astype(int).astype(str) + "%",
-        })
-        st.dataframe(tabela, hide_index=True, width="stretch")
-
-        if roteador and roteador.versoes:
-            titulo_grafico("Treinos do roteador", "validação cruzada: medida em pedidos que o modelo não viu no treino")
-            v = pd.DataFrame(roteador.versoes)
-            st.dataframe(pd.DataFrame({
-                "Versão": [f"v{i}" for i in range(1, len(v) + 1)],
-                "Treinado em": pd.to_datetime(v.data).dt.strftime("%d/%m"),
-                "Vereditos": v.pedidos,
-                "AUC": v.auc.round(2),
-                "Corte": v.corte.round(2),
-                "No Lite (validação)": (100 * v.lite_validacao).round(0).astype(int).astype(str) + "%",
-                "Qualidade (validação)": (100 * v.qualidade_validacao).round(0).astype(int).astype(str) + "%",
-            }), hide_index=True, width="stretch")
-
-        avaliacao = hist.custo_flash.sum() + hist.custo_lite.sum() + hist.custo_juiza.sum()
-        st.html(f'<div class="nota"><b>Quanto custa provar.</b> Para medir as quatro estratégias, cada pedido gera as duas '
-                f'respostas e passa pela juíza: até agora {usd(avaliacao)}. Em produção, o piloto chamaria só o modelo '
-                f'escolhido e gastaria {usd(pil.custo)}.</div>')
-
-# ---------- Decisões ----------
-if secao == "Decisoes":
-    secao_titulo("Cada decisão", "O que o piloto decidiu, por quê, e o que a juíza achou. Clique em um pedido para ver "
-                 "as duas respostas lado a lado.")
-    if not tem_dados:
-        sem_dados()
-    else:
-        datas = sorted(hist.data.unique(), reverse=True)
-        dia = st.selectbox("Rodada", datas, format_func=lambda d: f"{pd.to_datetime(d):%d/%m/%Y}")
-        d = hist[hist.data == dia].reset_index(drop=True)
-        acertou = (d.rota == "flash") | d.lite_ok.astype(bool)
-        lista = pd.DataFrame({
-            "Pedido": d.pedido.str.slice(0, 90),
-            "Escolha": d.rota.str.capitalize(),
-            "Juíza": d.vencedor.map({"lite": "Lite melhor", "flash": "Flash melhor", "empate": "empate"}),
-            "Resultado": np.where(acertou, "✓", "✕ Lite não deu conta"),
-            "Custo": np.where(d.rota == "lite", d.custo_lite, d.custo_flash).round(5),
-        })
-        ev = st.dataframe(lista, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
-                          height=320)
-        linha = ev.selection.rows[0] if ev.selection.rows else 0
-        p = d.iloc[linha]
-        st.html(f'<div class="pedido">{p.pedido}</div>'
-                f'<div class="etiquetas"><span>escolha <b class="{p.rota}">{p.rota.capitalize()}</b></span>'
-                f'<span>{p.motivo}</span><span>juíza: <b>{p.motivo_juiza}</b></span></div>')
-        c1, c2 = st.columns(2, gap="large")
-        for col, braco, nome in [(c1, "flash", p.modelo_flash), (c2, "lite", p.modelo_lite)]:
-            with col:
-                titulo_grafico(f"{braco.capitalize()} · nota {int(p['nota_' + braco])}",
-                               f"{nome} · {br(p[braco + '_saida'] + p[braco + '_raciocinio'])} tokens de saída · "
-                               f"{usd(p['custo_' + braco])}")
-                with st.container(height=420, border=True):
-                    st.markdown(p["resposta_" + braco])
-
-# ---------- Como funciona ----------
-if secao == "Como":
-    secao_titulo("Como o piloto funciona", "Três IAs trabalham juntas: o previsor estima o tamanho da resposta, o "
-                 "roteador decide o modelo e a juíza confere a qualidade. As notas da juíza ensinam o roteador.")
-    rot = roteador or roteador_inicial(modelo)
-    st.html(f"""<div class="passos">
-      <div class="passo"><div><span class="quemfaz">automação</span><h4>Todo dia, sozinho</h4>
-        <p>O GitHub Actions dispara a rodada às 8h. O piloto sorteia pedidos reais do OpenAssistant que ainda não
-        atendeu, todos do conjunto de teste: o previsor nunca viu nenhum deles.</p></div>
-        <div class="formula">fila: {br(len(pd.read_csv(DADOS / "fila_pedidos.csv")))} pedidos reais
-<i>por rodada:</i> 50 pedidos</div></div>
-
-      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Previsão do tamanho da resposta</h4>
-        <p>O Gradient Boosting treinado com 18.924 conversas estima quantos tokens a resposta vai ter (mediana e
-        faixa de 80%). Respostas longas tendem a ser pedidos mais difíceis.</p></div>
-        <div class="formula">entrada: tokens do pedido · tem código?
+    with st.expander("Como o piloto funciona", expanded=True):
+        st.html(f"""<div class="passos">
+          <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Previsão do tamanho da resposta</h4>
+            <p>Um Gradient Boosting treinado com 18.924 conversas reais estima quantos tokens a resposta vai ter.
+            Respostas longas tendem a ser pedidos mais difíceis.</p></div>
+            <div class="formula">entrada: tokens do pedido · tem código?
          nº de "?" · idioma
 <i>saída:</i>  p10 · mediana · p90 de tokens</div></div>
 
-      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Decisão: Lite ou Flash</h4>
-        <p>Na primeira rodada, uma regra: pedido sem código e com resposta prevista curta vai para o Lite. Depois, uma
-        regressão logística aprende com as notas da juíza a chance de o Lite dar conta de cada pedido.</p></div>
-        <div class="formula">Lite se P(Lite dá conta) ≥ corte
+          <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Decisão: Lite ou Flash</h4>
+            <p>Antes de qualquer chamada à IA. No começo, uma regra; depois, uma regressão logística que aprende
+            com os vereditos a chance de o Lite dar conta do pedido.</p></div>
+            <div class="formula">Lite se P(Lite dá conta) ≥ corte
 <i>corte:</i> o menor que mantém a qualidade ≥ {pct(META_QUALIDADE)}
 <i>agora:</i> {"regra, p90 < " + br(rot.limiar_p90) + " tokens" if rot.tipo == "regra" else f"v{rot.versao}, corte {br(rot.corte, 2)}"}</div></div>
 
-      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>As duas respostas</h4>
-        <p>Para provar o resultado, o Flash e o Lite respondem a todos os pedidos. Em produção, só o escolhido
-        responderia. A própria API informa os tokens de cada chamada.</p></div>
-        <div class="formula">custo = ( entrada × preço de entrada
+          <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>Só o escolhido responde</h4>
+            <p>No assistente, só o modelo escolhido gera a resposta: a economia é real. Se o orçamento do dia acabar,
+            tudo vai para o Lite; se um modelo estiver sobrecarregado, o outro responde.</p></div>
+            <div class="formula">custo = ( entrada × preço de entrada
         + (resposta + raciocínio) × preço de saída ) ÷ 1.000.000</div></div>
 
-      <div class="passo"><div><span class="quemfaz gem">Gemini · juíza</span><h4>A juíza compara</h4>
-        <p>Outra chamada ao Gemini recebe o pedido e as duas respostas como A e B, em ordem sorteada, sem saber qual
-        modelo gerou cada uma, e devolve notas de 1 a 5 e o veredito em JSON.</p></div>
-        <div class="formula">Lite deu conta = juíza disse "empate"
+          <div class="passo"><div><span class="quemfaz gem">Gemini · juíza</span><h4>Auditoria em amostra</h4>
+            <p>Em 1 de cada 5 perguntas, depois que o usuário já recebeu a resposta, o outro modelo também responde e
+            uma IA juíza compara as duas às cegas. O usuário também avalia com 👍/👎.</p></div>
+            <div class="formula">Lite deu conta = juíza disse "empate"
                   ou preferiu o Lite</div></div>
 
-      <div class="passo"><div><span class="quemfaz ml">aprendizado contínuo</span><h4>O roteador se retreina</h4>
-        <p>Os vereditos de todas as rodadas viram dados de treino. O corte é escolhido com validação cruzada, em
-        pedidos que o modelo não viu. O resultado vai para o repositório e o app se atualiza sozinho.</p></div>
-        <div class="formula">roteador.json + execucoes/AAAA-MM-DD.csv
-<i>→</i> commit automático → app atualizado</div></div>
-    </div>""")
+          <div class="passo"><div><span class="quemfaz">automação</span><h4>Teste controlado diário</h4>
+            <p>Às 8h, o GitHub Actions roda pedidos do OpenAssistant nos dois modelos e na juíza: é a comparação
+            justa entre estratégias.</p></div>
+            <div class="formula">fila: {br(len(pd.read_csv(DADOS / "fila_pedidos.csv")))} pedidos que o previsor nunca viu</div></div>
 
-    titulo_grafico("Teste um pedido", "o roteador atual decide na hora, sem chamar o Gemini")
-    texto = st.text_input("Pedido", "Explique juros compostos com um exemplo", label_visibility="collapsed")
-    if texto.strip():
-        x, prev = piloto.caracteristicas(texto, "pt-BR", modelo)
-        rota, motivo = rot.decidir(x)
-        st.html(f'<div class="etiquetas"><span>previsão <b>~{br(prev.mediana)}</b> tokens '
-                f'({br(prev.p10)}–{br(prev.p90)})</span><span>escolha <b class="{rota}">{rota.capitalize()}</b></span>'
-                f'<span>{motivo}</span></div>')
+          <div class="passo"><div><span class="quemfaz ml">aprendizado contínuo</span><h4>Retreino, diário e alerta</h4>
+            <p>O roteador se retreina com os vereditos do teste e do uso real. A IA escreve o diário do dia; se a
+            qualidade cair abaixo da meta, o workflow abre uma issue sozinho.</p></div>
+            <div class="formula">roteador.json + diário → commit automático
+<i>→</i> app atualizado</div></div>
+        </div>""")
+        titulo_grafico("Teste o roteador", "decide na hora, sem chamar o Gemini")
+        texto = st.text_input("Pedido", "Explique juros compostos com um exemplo", label_visibility="collapsed")
+        if texto.strip():
+            x, prev = piloto.caracteristicas(texto, "pt-BR", modelo)
+            rota, motivo = rot.decidir(x)
+            st.html(f'<div class="etiquetas"><span>previsão <b>~{br(prev.mediana)}</b> tokens '
+                    f'({br(prev.p10)}–{br(prev.p90)})</span><span>escolha <b class="{rota}">{rota.capitalize()}</b></span>'
+                    f'<span>{motivo}</span></div>')
 
-# ---------- O previsor ----------
-if secao == "Previsor":
-    p = modelo.pares
-    m = modelo.metricas.set_index("modelo")
-    gb = m.loc["Gradient Boosting"]
-    real, previsto = modelo.custo_mensal(10_000, PRECO_IN, PRECO_OUT)
-    erro_mes = 100 * np.median(np.abs(previsto - real) / real)
-    secao_titulo("O previsor de tokens", "A primeira peça do piloto. Base pública OpenAssistant (oasst1), com 18.924 "
-                 "pares de pergunta e resposta reais. Aprendizado supervisionado (regressão), validado em 25% dos "
-                 "dados que o modelo não viu durante o treino.")
-    faixa([
-        ("Conversas na base", br(len(p)), "pares pergunta → resposta", False),
-        ("Erro médio", f"{br(gb.mae)} tokens", f"chute ingênuo: {br(m.loc['Baseline (mediana)'].mae)}", False),
-        ("Acerto da faixa 80%", f"{br(100 * modelo.cobertura_faixa)}%", "no conjunto de teste", False),
-        ("Erro no custo do mês", f"{br(erro_mes, 1)}%", "10.000 respostas (Monte Carlo)", True),
-    ])
-    g1, g2 = st.columns(2, gap="large")
-    with g1:
-        titulo_grafico("Quantos tokens têm perguntas e respostas", "a resposta costuma ser ~10 vezes maior")
-        bins = np.logspace(0, 3.8, 45)
-        fig = go.Figure()
-        for col, nome, cor in [("prompt_tokens", "pergunta", CINZA), ("resp_tokens", "resposta", DESTAQUE)]:
-            h, e = np.histogram(p[col], bins=bins)
-            fig.add_bar(x=np.sqrt(e[:-1] * e[1:]), y=h, name=nome, marker_color=cor, opacity=.85)
-        fig.update_layout(barmode="overlay", xaxis_type="log", xaxis_title="tokens (escala log)", yaxis_title="conversas")
-        grafico(fig)
-    with g2:
-        titulo_grafico("Erro por resposta", "quanto menor, melhor")
-        fig = go.Figure(go.Bar(x=m.index, y=m.mae, marker_color=[CINZA, CINZA, DESTAQUE],
-                               text=[br(v) for v in m.mae], textposition="outside"))
-        fig.update_layout(yaxis_title="erro médio absoluto (tokens)", yaxis_range=[0, m.mae.max() * 1.18])
-        grafico(fig)
-    g3, g4 = st.columns(2, gap="large")
-    with g3:
-        titulo_grafico("O idioma muda o custo", "tokens gastos a cada 1.000 caracteres")
-        d = modelo.idiomas.sort_values("tokens_por_1000_caracteres")
-        fig = go.Figure(go.Bar(
-            x=d.tokens_por_1000_caracteres, y=[NOMES_IDIOMAS[l] for l in d.lang], orientation="h",
-            marker_color=[DESTAQUE if l == "pt-BR" else CINZA for l in d.lang],
-            hovertemplate="%{x:.0f} tokens<extra></extra>"))
-        grafico(fig)
-    with g4:
-        titulo_grafico("Custo de 10.000 respostas", "2.000 simulações: o previsto fica colado no real")
-        fig = go.Figure()
-        fig.add_histogram(x=real, name="real", marker_color=CINZA, opacity=.8, nbinsx=50)
-        fig.add_histogram(x=previsto, name="previsto", marker_color=DESTAQUE, opacity=.75, nbinsx=50)
-        fig.update_layout(barmode="overlay", xaxis_title="US$", yaxis_title="simulações")
-        grafico(fig)
-    st.html(f"""
-    <div class="nota"><b>Por que o previsor sozinho não bastava.</b> Prever o tamanho de <i>uma</i> resposta é difícil:
-    o modelo explica ~{br(100 * gb.r2)}% da variação e bate o chute ingênuo por pouco. No total de milhares de respostas
-    os erros se compensam (~{br(erro_mes)}% no custo do mês), mas para isso uma média histórica já serve. O ganho real
-    veio de usar a previsão como uma das pistas para <b>decidir</b> o modelo de cada pedido.</div>""")
+    with st.expander("Uso real: últimas perguntas"):
+        if reais.empty:
+            st.caption("Nenhuma pergunta registrada ainda.")
+        else:
+            u = reais.sort_values("criado_em", ascending=False).head(200)
+            st.dataframe(pd.DataFrame({
+                "Quando": u.criado_em.dt.tz_convert("America/Sao_Paulo").dt.strftime("%d/%m %H:%M"),
+                "Pergunta": u.pedido.str.slice(0, 90),
+                "Escolha": u.rota.str.capitalize(),
+                "Motivo": u.motivo,
+                "Custo": u.custo.round(5),
+                "Auditada": np.where(u.auditado, u.vencedor.map({"lite": "Lite melhor", "flash": "Flash melhor",
+                                                                 "empate": "empate"}), ""),
+                "Usuário": u.feedback.map({1: "👍", -1: "👎"}).fillna(""),
+            }), hide_index=True, width="stretch")
 
-# ---------- Sobre ----------
-if secao == "Sobre":
-    c1, c2 = st.columns(2, gap="large")
-    with c1:
-        st.markdown("""
-#### O problema
-Toda aplicação com IA generativa paga por **token**, e o modelo mais capaz custa várias vezes mais que o mais
-simples. Mandar tudo para o modelo caro desperdiça dinheiro; mandar tudo para o barato derruba a qualidade.
+    with st.expander("Teste controlado: rodada a rodada"):
+        if not tem_controle:
+            st.caption("A primeira rodada ainda não aconteceu.")
+        else:
+            rodadas = hist.groupby("rodada").apply(
+                lambda d: pd.concat([piloto.avaliar(d).loc["Piloto automático"],
+                                     pd.Series({"pedidos": len(d), "versao": int(d.versao_roteador.iloc[0])})]),
+                include_groups=False).reset_index()
+            titulo_grafico("Economia e qualidade do piloto", "a linha pontilhada é a meta de qualidade")
+            fig = go.Figure()
+            fig.add_scatter(x=rodadas.rodada, y=100 * rodadas.qualidade, mode="lines+markers", name="qualidade",
+                            line=dict(color=TINTA, width=2))
+            fig.add_scatter(x=rodadas.rodada, y=100 * rodadas.economia, mode="lines+markers", name="economia",
+                            line=dict(color=DESTAQUE, width=2))
+            fig.add_hline(y=100 * META_QUALIDADE, line=dict(color=MUDO, dash="dot", width=1))
+            fig.update_layout(yaxis_title="%", yaxis_range=[0, 105], xaxis_type="category")
+            grafico(fig)
+            st.dataframe(pd.DataFrame({
+                "Rodada": rodadas.rodada, "Pedidos": rodadas.pedidos.astype(int),
+                "Roteador": ["regra" if v == 0 else f"v{int(v)}" for v in rodadas.versao],
+                "No Lite": (100 * rodadas.lite).round(0).astype(int).astype(str) + "%",
+                "Economia": (100 * rodadas.economia).round(0).astype(int).astype(str) + "%",
+                "Qualidade": (100 * rodadas.qualidade).round(0).astype(int).astype(str) + "%",
+            }), hide_index=True, width="stretch")
+            if roteador and roteador.versoes:
+                titulo_grafico("Treinos do roteador", "validação cruzada: medida em pedidos que o modelo não viu no treino")
+                v = pd.DataFrame(roteador.versoes)
+                st.dataframe(pd.DataFrame({
+                    "Versão": [f"v{i}" for i in range(1, len(v) + 1)], "Treinado em": v.data, "Rótulos": v.pedidos,
+                    "AUC": v.auc.round(2), "Corte": v.corte.round(2),
+                    "No Lite": (100 * v.lite_validacao).round(0).astype(int).astype(str) + "%",
+                    "Qualidade": (100 * v.qualidade_validacao).round(0).astype(int).astype(str) + "%",
+                }), hide_index=True, width="stretch")
+            custo_teste = hist.custo_flash.sum() + hist.custo_lite.sum() + hist.custo_juiza.sum()
+            st.html(f'<div class="nota">O teste controlado gera as duas respostas e chama a juíza em todos os pedidos: '
+                    f'custou {usd(custo_teste)} até agora. É o preço de medir com rigor.</div>')
 
-#### A solução
-Um **piloto automático** que decide, pedido a pedido, qual modelo usar, mede o resultado com uma IA juíza e
-**aprende sozinho** com isso. Roda todo dia, sem ninguém clicar.
+    with st.expander("Teste controlado: cada decisão"):
+        if not tem_controle:
+            st.caption("A primeira rodada ainda não aconteceu.")
+        else:
+            rodada = st.selectbox("Rodada", sorted(hist.rodada.unique(), reverse=True))
+            d = hist[hist.rodada == rodada].reset_index(drop=True)
+            acertou = (d.rota == "flash") | d.lite_ok.astype(bool)
+            ev = st.dataframe(pd.DataFrame({
+                "Pedido": d.pedido.str.slice(0, 90), "Escolha": d.rota.str.capitalize(),
+                "Juíza": d.vencedor.map({"lite": "Lite melhor", "flash": "Flash melhor", "empate": "empate"}),
+                "Resultado": np.where(acertou, "✓", "✕ Lite não deu conta"),
+                "Custo": np.where(d.rota == "lite", d.custo_lite, d.custo_flash).round(5),
+            }), hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row", height=300)
+            p = d.iloc[ev.selection.rows[0] if ev.selection.rows else 0]
+            st.html(f'<div class="pedido">{p.pedido}</div>'
+                    f'<div class="etiquetas"><span>escolha <b class="{p.rota}">{p.rota.capitalize()}</b></span>'
+                    f'<span>{p.motivo}</span><span>juíza: <b>{p.motivo_juiza}</b></span></div>')
+            c1, c2 = st.columns(2, gap="large")
+            for col, braco, nome in [(c1, "flash", p.modelo_flash), (c2, "lite", p.modelo_lite)]:
+                with col:
+                    titulo_grafico(f"{braco.capitalize()} · nota {int(p['nota_' + braco])}",
+                                   f"{nome} · {br(p[braco + '_saida'] + p[braco + '_raciocinio'])} tokens de saída · "
+                                   f"{usd(p['custo_' + braco])}")
+                    with st.container(height=380, border=True):
+                        st.markdown(p["resposta_" + braco])
 
+    with st.expander("O previsor de tokens"):
+        p = modelo.pares
+        m = modelo.metricas.set_index("modelo")
+        gb = m.loc["Gradient Boosting"]
+        faixa([
+            ("Conversas na base", br(len(p)), "pares pergunta → resposta", False),
+            ("Erro médio", f"{br(gb.mae)} tokens", f"chute ingênuo: {br(m.loc['Baseline (mediana)'].mae)}", False),
+            ("Acerto da faixa 80%", f"{br(100 * modelo.cobertura_faixa)}%", "no conjunto de teste", False),
+        ])
+        g1, g2 = st.columns(2, gap="large")
+        with g1:
+            titulo_grafico("Quantos tokens têm perguntas e respostas", "a resposta costuma ser ~10 vezes maior")
+            bins = np.logspace(0, 3.8, 45)
+            fig = go.Figure()
+            for col, nome, cor in [("prompt_tokens", "pergunta", CINZA), ("resp_tokens", "resposta", DESTAQUE)]:
+                h, e = np.histogram(p[col], bins=bins)
+                fig.add_bar(x=np.sqrt(e[:-1] * e[1:]), y=h, name=nome, marker_color=cor, opacity=.85)
+            fig.update_layout(barmode="overlay", xaxis_type="log", xaxis_title="tokens (escala log)", yaxis_title="conversas")
+            grafico(fig)
+        with g2:
+            titulo_grafico("O idioma muda o custo", "tokens gastos a cada 1.000 caracteres")
+            d = modelo.idiomas.sort_values("tokens_por_1000_caracteres")
+            fig = go.Figure(go.Bar(
+                x=d.tokens_por_1000_caracteres, y=[NOMES_IDIOMAS[l] for l in d.lang], orientation="h",
+                marker_color=[DESTAQUE if l == "pt-BR" else CINZA for l in d.lang],
+                hovertemplate="%{x:.0f} tokens<extra></extra>"))
+            grafico(fig)
+        st.html(f'<div class="nota">Sozinho, o previsor explica ~{br(100 * gb.r2)}% da variação do tamanho de uma resposta: '
+                f'pouco para prever custo, mas útil como uma das pistas para decidir o modelo.</div>')
+
+    with st.expander("Sobre, validade e limitações"):
+        c1, c2 = st.columns(2, gap="large")
+        with c1:
+            st.markdown("""
 #### A família de algoritmos
-- **Regressão** (Gradient Boosting e regressão quantílica): prevê o tamanho da resposta.
+- **Regressão** (Gradient Boosting e quantílica): prevê o tamanho da resposta.
 - **Classificação** (regressão logística): prevê se o modelo barato dá conta do pedido.
-- **LLM como juiz**: o Gemini avalia as respostas, validado contra avaliação humana.
-- **Aprendizado contínuo**: o roteador é retreinado a cada rodada.
-- **Monte Carlo**: projeção do custo de milhares de respostas.
-""")
-    with c2:
-        st.markdown("""
-#### Os dados
-[OpenAssistant oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1): ~88 mil mensagens reais,
-18.924 pares pergunta → melhor resposta. Licença Apache 2.0. Os pedidos do piloto saem do conjunto de teste.
+- **LLM como juiz**: o Gemini avalia as respostas às cegas, conferido com o 👍/👎 dos usuários.
+- **Aprendizado contínuo**: o roteador se retreina todo dia, com o teste e com o uso real.
+- **Bootstrap e Monte Carlo**: intervalos de confiança e projeção do custo mensal.
 
+#### Os dados
+[OpenAssistant oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1) (Apache 2.0): treino do previsor
+e pedidos do teste controlado. O uso real vem das perguntas feitas no assistente.
+""")
+        with c2:
+            st.markdown("""
 #### É válido?
-- As duas respostas são geradas para todos os pedidos: a comparação entre estratégias é nos mesmos pedidos.
+- No teste controlado, as estratégias são comparadas nos mesmos pedidos.
 - A juíza não sabe qual modelo gerou cada resposta, e a ordem é sorteada.
 - O corte do roteador é escolhido com validação cruzada.
-- Uma amostra é avaliada por uma pessoa para medir se a juíza é confiável.
+- No uso real, a qualidade é estimada por uma amostra aleatória auditada.
 
 #### Limitações
 - A juíza é do mesmo fornecedor dos modelos avaliados.
+- Quando o Lite responde e não é auditado, o custo do Flash é estimado.
 - Os preços por token são de tabela e mudam com o tempo.
-- Os pedidos do OpenAssistant são genéricos; uma aplicação real teria outro perfil.
 """)
-    st.caption("Atividade de IA aplicada e IA experimental, Prof. Wagner, 3º ciclo.")
+        st.caption("Atividade de IA aplicada e IA experimental, Prof. Wagner, 3º ciclo.")
