@@ -1,48 +1,19 @@
-import os
-import threading
-from datetime import date, datetime
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import ia
-from core.modelo import NOMES_IDIOMAS, ModeloTokens, contar_tokens
+from core import piloto
+from core.modelo import DADOS, NOMES_IDIOMAS, ModeloTokens
 
 st.set_page_config(page_title="TokenScope", page_icon="◆", layout="wide", initial_sidebar_state="collapsed")
 
 TINTA, MUDO, LINHA, PAPEL = "#161616", "#6B6A65", "#E3E1DA", "#F7F6F2"
 DESTAQUE, BOM, RUIM, CINZA = "#C2410C", "#3F6B4E", "#A33A2B", "#B8B5AC"
-INSTRUCAO = ("Você é um assistente prestativo e direto. Responda em português do Brasil, "
-             "com clareza, usando listas ou exemplos quando ajudarem.")
-SUGESTOES = [
-    "Explique juros compostos com um exemplo",
-    "Monte um roteiro de estudos de Python em 4 semanas",
-    "Quais as diferenças entre IA, machine learning e deep learning?",
-]
-
-
-def escolher_sugestao():
-    st.session_state.pendente = st.session_state.sugestao
-    st.session_state.sugestao = None
-
-
-def config(nome, padrao):
-    try:
-        v = st.secrets.get(nome)
-    except Exception:
-        v = None
-    return v if v is not None else os.environ.get(nome, padrao)
-
-
-CHAVE = config("GEMINI_API_KEY", None)
-MODELO_IA = config("GEMINI_MODEL", "gemini-3.8-flash")
-RESERVA_FIXA = config("GEMINI_MODEL_RESERVA", None)  # se vazio, o app escolhe um Flash leve disponível na chave
-PRECO_IN = float(config("PRECO_ENTRADA", 0.30))   # US$ por 1M tokens
-PRECO_OUT = float(config("PRECO_SAIDA", 2.50))    # US$ por 1M tokens (inclui raciocínio)
-LIMITE_SESSAO = int(config("LIMITE_SESSAO", 15))
-LIMITE_DIA = int(config("LIMITE_DIA", 300))
+EXECUCOES = DADOS / "execucoes"
+META_ECONOMIA, META_QUALIDADE, META_CONCORDANCIA = 0.30, 0.90, 0.80
+PRECO_IN, PRECO_OUT = piloto.PRECOS_PADRAO["flash"]
+CORES_ESTRATEGIA = {"Sempre Flash": CINZA, "Sempre Lite": CINZA, "Piloto automático": DESTAQUE, "Escolha perfeita": TINTA}
 
 st.html("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,43 +64,6 @@ button[kind="segmented_controlActive"] { color: var(--tinta) !important; }
 button[kind="segmented_controlActive"]::after { transform: scaleX(1); }
 button[kind="segmented_control"] p, button[kind="segmented_controlActive"] p { font-size: .95rem; font-weight: 500; }
 
-/* chat */
-div[data-testid="stChatMessageAvatarUser"], div[data-testid="stChatMessageAvatarAssistant"] { display:none; }
-div[data-testid="stChatMessage"] { background: transparent; padding: .2rem 0 1.2rem; gap: 0; animation: surge .35s ease both; }
-div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { padding-bottom: .6rem; }
-div[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) div[data-testid="stChatMessageContent"] {
-  background:#EDEBE4; border-radius: 4px 14px 14px 14px; padding: .65rem .95rem; width: fit-content; max-width: 85%; }
-div[data-testid="stChatMessageContent"] p, div[data-testid="stChatMessageContent"] li { font-size: 1rem; line-height: 1.65; color: var(--tinta); }
-.quem { font-size:.68rem; letter-spacing:.09em; text-transform:uppercase; color: var(--mudo); font-weight:500; margin-bottom:.35rem; }
-.conta { font-family: var(--mono); font-size:.76rem; color: var(--mudo); margin-top:.7rem; padding-top:.55rem;
-  border-top:1px dashed var(--linha); display:flex; flex-wrap:wrap; gap:.25rem 1.1rem; font-variant-numeric: tabular-nums; }
-.conta b { color: var(--tinta); font-weight:500; }
-.conta .ok { color: var(--bom); } .conta .fora { color: var(--ruim); }
-div[data-testid="stChatInput"] { background:#fff; border:1px solid var(--linha); border-radius: 10px; box-shadow: none; transition: border-color .2s; }
-div[data-testid="stChatInput"]:focus-within { border-color: var(--tinta); }
-
-/* começo da conversa */
-.comeco h3 { font-family: var(--serif) !important; font-weight:400; font-size: 2rem; color: var(--tinta); margin: .4rem 0 .3rem; padding:0; }
-.comeco p { color: var(--mudo); margin: 0 0 1rem; }
-button[kind="pills"] { background: transparent !important; border: 1px solid var(--linha) !important; border-radius: 6px !important;
-  color: var(--tinta) !important; transition: border-color .2s, background .2s; }
-button[kind="pills"]:hover { border-color: var(--tinta) !important; background: #fff !important; }
-button[kind="pills"] p::after { content: "  →"; color: var(--mudo); }
-
-/* cupom da conversa */
-.cupom { background:#FFFEFB; border:1px solid var(--linha); border-bottom:none; padding: 1.2rem 1.2rem 1.4rem; font-family: var(--mono);
-  font-size:.8rem; color: var(--tinta); position: relative; animation: surge .6s ease both;
-  box-shadow: 0 1px 0 rgba(0,0,0,.02), 0 10px 20px -16px rgba(0,0,0,.25); }
-.cupom::after { content:""; position:absolute; left:-1px; right:-1px; bottom:-8px; height:8px;
-  background: linear-gradient(-45deg, transparent 6px, #FFFEFB 0) 0 0/12px 8px repeat-x,
-              linear-gradient(45deg, transparent 6px, #FFFEFB 0) 0 0/12px 8px repeat-x; }
-.cupom .tit { text-align:center; letter-spacing:.2em; font-size:.72rem; color: var(--mudo); }
-.cupom hr { border:none; border-top:1px dashed #CFCBC0; margin:.7rem 0; }
-.cupom .l { display:flex; align-items:baseline; gap:.4rem; margin:.28rem 0; }
-.cupom .l span:nth-child(2) { flex:1; border-bottom:1px dotted #CFCBC0; transform: translateY(-3px); }
-.cupom .total { font-weight:500; font-size:.92rem; }
-.cupom .rodape { color: var(--mudo); font-size:.72rem; line-height:1.6; margin-top:.8rem; }
-
 /* painéis de números e notas */
 .faixa { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-top:1px solid var(--tinta);
   border-bottom:1px solid var(--linha); margin: .2rem 0 2rem; }
@@ -148,14 +82,21 @@ button[kind="pills"] p::after { content: "  →"; color: var(--mudo); }
 .vazio h3 { font-family: var(--serif) !important; font-weight:400; font-size: 1.8rem; color: var(--tinta); margin:0 0 .3rem; padding:0; }
 .stMarkdown h4 { font-family: var(--serif) !important; font-weight:400; font-size:1.6rem; }
 
+/* metas */
+.metas { border-top:1px solid var(--tinta); margin: 0 0 2rem; }
+.meta { display:grid; grid-template-columns: 1.6rem minmax(0,1fr) auto; gap: 1rem; padding:.7rem 0; border-bottom:1px solid var(--linha);
+  align-items:baseline; font-size:.95rem; color:#3A3935; }
+.meta b { font-family: var(--mono); font-weight:500; color: var(--tinta); font-variant-numeric: tabular-nums; }
+.meta .s { font-family: var(--mono); }
+.meta .ok { color: var(--bom); } .meta .fora { color: var(--ruim); } .meta .pend { color: var(--mudo); }
+
+/* decisão e respostas lado a lado */
+.pedido { font-size:1.05rem; line-height:1.6; color: var(--tinta); border-top:1px solid var(--tinta); padding:1rem 0 .6rem; }
+.etiquetas { font-family: var(--mono); font-size:.78rem; color: var(--mudo); display:flex; flex-wrap:wrap; gap:.3rem 1.2rem; margin-bottom:1.2rem; }
+.etiquetas b { color: var(--tinta); font-weight:500; }
+.etiquetas .lite { color: var(--bom); } .etiquetas .flash { color: var(--destaque); }
+
 /* como funciona */
-.duas { display:grid; grid-template-columns: 1fr 1fr; border-top:1px solid var(--tinta); margin-bottom: 2.4rem; }
-@media (max-width: 900px) { .duas { grid-template-columns: 1fr; } }
-.duas > div { padding: 1.2rem 1.6rem 1.4rem 0; }
-.duas > div + div { border-left:1px solid var(--linha); padding-left: 1.6rem; }
-.duas h3 { font-family: var(--serif) !important; font-weight:400; font-size:1.7rem; color: var(--tinta); margin:.3rem 0 .5rem; padding:0; }
-.duas p, .duas li { color:#3A3935; font-size:.95rem; line-height:1.6; }
-.duas ul { margin:.4rem 0 0; padding-left:1.1rem; }
 .passos { counter-reset: passo; border-top:1px solid var(--tinta); margin-bottom: 2.4rem; }
 .passo { display:grid; grid-template-columns: 4.2rem minmax(0,1.2fr) minmax(0,1fr); gap: 1.4rem; padding: 1.2rem 0;
   border-bottom:1px solid var(--linha); align-items:start; }
@@ -207,338 +148,297 @@ def usd(v):
     return f"US$ {br(v, 5 if v < 0.01 else 4 if v < 1 else 2)}"
 
 
-@st.cache_resource(show_spinner="Carregando o modelo treinado com 18.924 conversas reais…")
+def pct(v):
+    return f"{br(100 * v)}%"
+
+
+def secao_titulo(titulo, texto):
+    st.html(f'<div class="secao"><h2>{titulo}</h2><p>{texto}</p></div>')
+
+
+@st.cache_resource(show_spinner="Carregando o previsor treinado com 18.924 conversas reais…")
 def carregar_modelo():
     return ModeloTokens()
 
 
-@st.cache_resource
-def registro():
-    """Uso de todos os visitantes, guardado enquanto o servidor estiver no ar."""
-    return {"trava": threading.Lock(), "eventos": [], "dia": date.today(), "chamadas_dia": 0}
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def reserva_automatica(_chave, principal):
-    return ia.escolher_reserva(_chave, principal)
+@st.cache_data(ttl=600, show_spinner=False)
+def carregar_execucoes():
+    return piloto.carregar_historico(EXECUCOES), piloto.Roteador.carregar(EXECUCOES / "roteador.json")
 
 
 @st.cache_data(show_spinner=False)
-def calibrar(_chave, modelo):
-    return ia.fator_calibracao(_chave, modelo)
+def carregar_validacao():
+    caminho = DADOS / "validacao_humana.csv"
+    if not caminho.exists():
+        return None
+    v = pd.read_csv(caminho, dtype=str).fillna("")
+    v = v[v.sua_escolha.str.strip().str.upper().isin(["A", "B", "EMPATE"])]
+    return v if len(v) else None
+
+
+@st.cache_resource(show_spinner="Calculando a regra inicial…")
+def roteador_inicial(_modelo):
+    return piloto.regra_inicial(_modelo, pd.read_csv(DADOS / "fila_pedidos.csv"))
 
 
 modelo = carregar_modelo()
-reg = registro()
-st.session_state.setdefault("conversa", [])
-st.session_state.setdefault("enviadas", 0)
+hist, roteador = carregar_execucoes()
+tem_dados = not hist.empty
+if tem_dados:
+    aval = piloto.avaliar(hist)
+    pil = aval.loc["Piloto automático"]
+    rodadas = hist.groupby("data").apply(
+        lambda d: pd.concat([piloto.avaliar(d).loc["Piloto automático"],
+                             pd.Series({"pedidos": len(d), "versao": int(d.versao_roteador.iloc[0])})]),
+        include_groups=False).reset_index()
 
-fator, erro_calibracao = 1.0, None
-if CHAVE:
-    try:
-        fator = calibrar(CHAVE, MODELO_IA)
-    except Exception as e:
-        erro_calibracao = str(e)[:200]
+concordancia = None
+validacao = carregar_validacao()
+if validacao is not None and tem_dados:
+    juiza = hist.set_index("id").vencedor
+    escolha = validacao.sua_escolha.str.strip().str.upper()
+    humano = np.where(escolha == "EMPATE", "empate",
+                      np.where((escolha == "A") == (validacao.gabarito_a == "lite"), "lite", "flash"))
+    # o que importa para o roteador: o Lite deu conta (empate ou melhor) ou não
+    acordo = (humano != "flash") == (juiza.reindex(validacao.id).values != "flash")
+    concordancia = (float(np.mean(acordo)), len(validacao))
 
-online = bool(CHAVE) and erro_calibracao is None
-MODELO_RESERVA = RESERVA_FIXA
-if online and not MODELO_RESERVA:
-    try:
-        MODELO_RESERVA = reserva_automatica(CHAVE, MODELO_IA)
-    except Exception:
-        MODELO_RESERVA = None
-
-eventos = reg["eventos"]
-
-
-def ajuste_ao_vivo(evs, minimo=3):
-    """Quanto o Gemini fala a mais (ou a menos) que as respostas humanas da base.
-
-    Mediana da razão real / previsto-base nas respostas já observadas, em escala log.
-    O modelo foi treinado com respostas de pessoas; este fator o adapta ao estilo do Gemini (aprendizado online).
-    """
-    razoes = [np.log(e["real"]) - np.log(e["base"]) for e in evs if e.get("base") and e["real"] > 0]
-    return (float(np.exp(np.median(razoes))) if len(razoes) >= minimo else 1.0), len(razoes)
-
-
-ajuste, n_ajuste = ajuste_ao_vivo(eventos)
-texto_ajuste = (f"ajuste ao vivo: ×{br(ajuste, 2)} ({n_ajuste} respostas do Gemini)" if n_ajuste >= 3
-                else f"ajuste ao vivo: começa após 3 respostas ({n_ajuste}/3)")
+ultima = f'última rodada {pd.to_datetime(hist.data.max()):%d/%m} · roteador v{roteador.versao}' if tem_dados else "aguardando a primeira rodada"
 st.html(f"""
 <div class="topo">
-  <div class="marca">TokenScope<small>um estudo sobre o custo de usar IA</small></div>
-  <div class="status"><i style="background:{BOM if online else RUIM}"></i>{MODELO_IA} · {"online" if online else "indisponível"}</div>
+  <div class="marca">TokenScope<small>piloto automático de custo de IA</small></div>
+  <div class="status"><i style="background:{BOM if tem_dados else CINZA}"></i>{ultima}</div>
 </div>
 <div class="abre">
   <div>
-    <h1>Use IA. Veja quanto <em>ela custa.</em></h1>
-    <p>Converse com o Gemini. Antes de cada resposta, um modelo treinado com 18.924 conversas reais
-    prevê quantos tokens a IA vai gerar. Depois, mostramos o consumo real e o custo.</p>
+    <h1>A IA escolhe o modelo. <em>Você paga menos.</em></h1>
+    <p>Todo dia, sem ninguém clicar, o piloto recebe pedidos reais e decide, para cada um, entre o Gemini Flash-Lite
+    (barato) e o Flash (mais capaz). Uma segunda IA confere se a qualidade se manteve, e o piloto aprende com as notas.</p>
   </div>
   <div class="numeros">
-    <div><span class="rotulo">Respostas geradas</span><b>{br(len(eventos))}</b></div>
-    <div><span class="rotulo">Tokens consumidos</span><b>{br(sum(e["entrada"] + e["real"] + e["raciocinio"] for e in eventos))}</b></div>
-    <div><span class="rotulo">Custo total</span><b>{usd(sum(e["custo"] for e in eventos))}</b></div>
+    <div><span class="rotulo">Pedidos atendidos</span><b>{br(len(hist)) if tem_dados else "–"}</b></div>
+    <div><span class="rotulo">Economia</span><b>{pct(pil.economia) if tem_dados else "–"}</b></div>
+    <div><span class="rotulo">Qualidade</span><b>{pct(pil.qualidade) if tem_dados else "–"}</b></div>
   </div>
 </div>
 """)
 
-SECOES = {"Assistente": "Assistente", "Painel": "Painel de consumo", "Como": "Como funciona",
-          "Algoritmo": "O algoritmo", "Sobre": "Sobre"}
-secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Assistente",
-                             key="secao", label_visibility="collapsed") or "Assistente"
+SECOES = {"Resultado": "Resultado", "Rodadas": "Rodadas", "Decisoes": "Decisões", "Como": "Como funciona",
+          "Previsor": "O previsor de tokens", "Sobre": "Sobre"}
+secao = st.segmented_control("Seção", list(SECOES), format_func=SECOES.get, default="Resultado",
+                             key="secao", label_visibility="collapsed") or "Resultado"
 
 
-def conta(m):
-    dentro = m["p10"] <= m["real"] <= m["p90"]
-    partes = [
-        f'previsto <b>~{br(m["previsto"])}</b> ({br(m["p10"])}–{br(m["p90"])})',
-        f'real <b>{br(m["real"])}</b> <span class="{"ok" if dentro else "fora"}">{"✓ na faixa" if dentro else "✕ fora da faixa"}</span>',
-    ]
-    if m["raciocinio"]:
-        partes.append(f'raciocínio <b>{br(m["raciocinio"])}</b>')
-    partes += [f'entrada <b>{br(m["entrada"])}</b>', f'<b>{usd(m["custo"])}</b>', f'{br(m["segundos"], 1)} s']
-    if m.get("modelo") and m["modelo"] != MODELO_IA:
-        partes.append(f'via {m["modelo"]}')
-    st.html(f'<div class="conta">{"".join(f"<span>{p}</span>" for p in partes)}</div>')
+def sem_dados():
+    st.html('<div class="vazio"><h3>A primeira rodada ainda não aconteceu.</h3>'
+            'O piloto roda uma vez por dia pelo GitHub Actions. Assim que terminar, os resultados aparecem aqui.</div>')
 
 
-def quem(nome):
-    st.html(f'<div class="quem">{nome}</div>')
-
-
-# ---------- Assistente ----------
-if secao == "Assistente":
-    if erro_calibracao:
-        st.warning(f"O Gemini recusou a conexão: {erro_calibracao}")
-    elif not CHAVE:
-        st.warning("A chave do Gemini não está configurada no servidor (Secrets → GEMINI_API_KEY).")
-
-    col_chat, col_lado = st.columns([2.3, 1], gap="large")
-    restante = LIMITE_SESSAO - st.session_state.enviadas
-    bloqueado = not online or restante <= 0 or reg["chamadas_dia"] >= LIMITE_DIA
-
-    with col_lado:
-        respostas = [m for m in st.session_state.conversa if m["papel"] == "model"]
-        acertos = sum(m["p10"] <= m["real"] <= m["p90"] for m in respostas)
-        ent = sum(m["entrada"] for m in respostas)
-        sai = sum(m["real"] + m["raciocinio"] for m in respostas)
-
-        def l(rot, val):
-            return f'<div class="l"><span>{rot}</span><span></span><span>{val}</span></div>'
-        st.html(f"""<div class="cupom">
-          <div class="tit">CUPOM DA CONVERSA</div>
-          <div class="tit">{datetime.now().strftime("%d/%m/%Y %H:%M")}</div><hr>
-          {l("respostas", br(len(respostas)))}
-          {l("tokens de entrada", br(ent))}
-          {l("tokens de saída", br(sai))}
-          {l("previsões na faixa", f"{acertos}/{len(respostas)}" if respostas else "–")}<hr>
-          <div class="l total"><span>TOTAL</span><span></span><span>{usd(sum(m["custo"] for m in respostas))}</span></div><hr>
-          <div class="rodape">preço de tabela por 1M tokens: US$ {br(PRECO_IN, 2)} entrada · US$ {br(PRECO_OUT, 2)} saída<br>
-          raciocínio do modelo é cobrado como saída<br>{texto_ajuste}<br>{restante} mensagens restantes nesta sessão</div>
-        </div>""")
-
-    with col_chat:
-        caixa = st.container()
-        with caixa:
-            boas_vindas = st.empty()
-            if not st.session_state.conversa:
-                with boas_vindas.container():
-                    st.html('<div class="comeco"><h3>Comece com uma pergunta.</h3>'
-                            '<p>Cada resposta vem com a previsão de tokens, o consumo real e o custo.</p></div>')
-                    st.pills("Sugestões", SUGESTOES, key="sugestao", on_change=escolher_sugestao,
-                             label_visibility="collapsed", disabled=not online)
-            for m in st.session_state.conversa:
-                with st.chat_message("user" if m["papel"] == "user" else "assistant"):
-                    if m["papel"] == "model":
-                        quem("Gemini")
-                    st.markdown(m["texto"])
-                    if m["papel"] == "model":
-                        conta(m)
-        pergunta = st.chat_input(
-            "Escreva sua pergunta…" if restante > 0 else "Limite de mensagens desta sessão atingido",
-            disabled=bloqueado) or st.session_state.pop("pendente", None)
-
-    if pergunta and not bloqueado:
-        boas_vindas.empty()
-        conversa = st.session_state.conversa
-        prev = modelo.prever(pergunta, "pt-BR", continuacao=bool(conversa))
-        escala = fator * ajuste
-        conversa.append({"papel": "user", "texto": pergunta})
-        with caixa:
-            with st.chat_message("user"):
-                st.markdown(pergunta)
-            with st.chat_message("assistant"):
-                quem("Gemini")
-                saida = st.empty()
-                saida.markdown(f"_Pensando… previsão de ~{br(prev.mediana * escala)} tokens "
-                               f"({br(prev.p10 * escala)}–{br(prev.p90 * escala)})_")
-                try:
-                    with reg["trava"]:
-                        if reg["dia"] != date.today():
-                            reg["dia"], reg["chamadas_dia"] = date.today(), 0
-                        reg["chamadas_dia"] += 1
-                    r = ia.conversar(conversa, CHAVE, MODELO_IA, INSTRUCAO, reserva=MODELO_RESERVA,
-                                     ao_receber=lambda t: saida.markdown(t + " ▍"))
-                except ia.GeminiIndisponivel as e:
-                    conversa.pop()
-                    saida.empty()
-                    if "429" in str(e):
-                        st.warning("O limite de uso do Gemini foi atingido. Tente de novo em um minuto.")
-                    else:
-                        st.warning("O Gemini não respondeu a tempo (instabilidade do Google). "
-                                   "Tentamos algumas vezes sem sucesso. Envie de novo em alguns segundos.")
-                    st.caption(f"Detalhe técnico: {str(e)[:160]}")
-                except Exception as e:
-                    conversa.pop()
-                    saida.empty()
-                    st.error(f"Erro ao chamar o Gemini: {str(e)[:200]}")
-                else:
-                    st.session_state.enviadas += 1
-                    real = r.resposta_tokens
-                    if not real and r.texto:  # a API não informou: estima pelo tokenizador calibrado
-                        real = round(contar_tokens(r.texto) * fator)
-                    resp = {
-                        "papel": "model", "texto": r.texto, "base": prev.mediana * fator,
-                        "previsto": prev.mediana * escala, "p10": prev.p10 * escala, "p90": prev.p90 * escala,
-                        "real": real, "raciocinio": r.raciocinio_tokens, "entrada": r.prompt_tokens,
-                        "segundos": r.segundos, "modelo": r.modelo,
-                        "custo": (r.prompt_tokens * PRECO_IN + (r.resposta_tokens + r.raciocinio_tokens) * PRECO_OUT) / 1e6,
-                    }
-                    conversa.append(resp)
-                    with reg["trava"]:
-                        reg["eventos"].append({**{k: v for k, v in resp.items() if k not in ("papel", "texto")},
-                                               "quando": datetime.now()})
-                    st.rerun()
-
-# ---------- Painel ----------
-if secao == "Painel":
-    st.html('<div class="secao"><h2>Painel de consumo</h2><p>Tudo o que foi gasto pelos visitantes, com os tokens '
-            'que o próprio Gemini informou em cada chamada.</p></div>')
-    ev = pd.DataFrame(eventos)
-    if ev.empty:
-        st.html('<div class="vazio"><h3>Nada por aqui ainda.</h3>'
-                'Converse com o assistente: cada resposta entra aqui com os tokens e o custo reais.</div>')
+# ---------- Resultado ----------
+if secao == "Resultado":
+    secao_titulo("O resultado", "Os mesmos pedidos, quatro jeitos de escolher o modelo. Para medir cada um, o sistema gera "
+                 "as duas respostas em todos os pedidos e a IA juíza compara: assim sabemos o que teria acontecido "
+                 "com qualquer escolha.")
+    if not tem_dados:
+        sem_dados()
     else:
-        saida = ev.real + ev.raciocinio
-        acerto = ((ev.real >= ev.p10) & (ev.real <= ev.p90)).mean()
+        flash = aval.loc["Sempre Flash"]
         faixa([
-            ("Respostas geradas", br(len(ev)), "por todos os visitantes", False),
-            ("Tokens consumidos", br(ev.entrada.sum() + saida.sum()),
-             f"{br(ev.entrada.sum())} entrada · {br(saida.sum())} saída", False),
-            ("Acerto da previsão", f"{br(100 * acerto)}%", f"dentro da faixa de 80% · {texto_ajuste}", False),
-            ("Custo total", usd(ev.custo.sum()), f"média de {usd(ev.custo.mean())} por resposta", True),
+            ("Economia", pct(pil.economia), "sobre usar sempre o Flash", True),
+            ("Qualidade", pct(pil.qualidade), "pedidos tão bem atendidos quanto pelo Flash", False),
+            ("Pedidos no Lite", pct(pil.lite), "o resto foi para o Flash", False),
+            ("Custo", usd(pil.custo), f"sempre Flash: {usd(flash.custo)}", False),
         ])
-        g1, g2 = st.columns([1.7, 1], gap="large")
+        g1, g2 = st.columns([1.3, 1], gap="large")
         with g1:
-            titulo_grafico("Previsto × real, resposta a resposta", "a área clara é a faixa em que o modelo esperava acertar 80% das vezes")
-            x = list(range(1, len(ev) + 1))
+            titulo_grafico("Custo × qualidade", "o melhor lugar é em cima e à esquerda")
             fig = go.Figure()
-            fig.add_scatter(x=x + x[::-1], y=list(ev.p90) + list(ev.p10[::-1]), fill="toself",
-                            fillcolor="rgba(22,22,22,.06)", line=dict(width=0), name="faixa prevista", hoverinfo="skip")
-            fig.add_scatter(x=x, y=ev.previsto, mode="lines", name="previsto", line=dict(color=TINTA, dash="dot", width=1.5))
-            fig.add_scatter(x=x, y=ev.real, mode="lines+markers", name="real", line=dict(color=DESTAQUE, width=2),
-                            marker=dict(size=6))
-            fig.update_layout(xaxis_title="resposta", yaxis_title="tokens")
+            for nome, r in aval.iterrows():
+                fig.add_scatter(x=[r.custo], y=[100 * r.qualidade], mode="markers+text", name=nome, text=[nome],
+                                textposition="top center", marker=dict(size=16 if nome == "Piloto automático" else 11,
+                                                                       color=CORES_ESTRATEGIA[nome]),
+                                hovertemplate=f"{nome}<br>US$ %{{x:.4f}} · %{{y:.0f}}%<extra></extra>")
+            fig.add_hline(y=100 * META_QUALIDADE, line=dict(color=MUDO, dash="dot", width=1),
+                          annotation_text="meta de qualidade", annotation_position="bottom right")
+            fig.update_layout(showlegend=False, xaxis_title="custo de gerar as respostas (US$)",
+                              yaxis_title="qualidade (%)", yaxis_range=[min(50, 100 * aval.qualidade.min() - 5), 105])
             grafico(fig)
         with g2:
-            titulo_grafico("Para onde vai o dinheiro", "participação de cada tipo de token no custo")
-            partes = pd.Series({"Entrada": ev.entrada.sum() * PRECO_IN, "Resposta": ev.real.sum() * PRECO_OUT,
-                                "Raciocínio": ev.raciocinio.sum() * PRECO_OUT})
-            partes = 100 * partes / partes.sum()
-            fig = go.Figure(go.Bar(x=partes.values, y=partes.index, orientation="h",
-                                   marker_color=[CINZA, DESTAQUE, TINTA], text=[f"{br(v)}%" for v in partes.values],
-                                   textposition="outside", hovertemplate="%{x:.1f}%<extra></extra>"))
+            titulo_grafico("Economia sobre usar sempre o Flash", "quanto maior, melhor")
+            fig = go.Figure(go.Bar(x=100 * aval.economia, y=aval.index, orientation="h",
+                                   marker_color=[CORES_ESTRATEGIA[n] for n in aval.index],
+                                   text=[pct(v) for v in aval.economia], textposition="outside",
+                                   hovertemplate="%{x:.1f}%<extra></extra>"))
             fig.update_layout(xaxis=dict(visible=False, range=[0, 115]), yaxis=dict(autorange="reversed"))
-            grafico(fig, 260)
-        st.html(f'<div class="nota">No ritmo atual, <b>10.000 respostas</b> custariam cerca de '
-                f'<b>{usd(ev.custo.mean() * 10_000)}</b>.</div>')
-        st.html(f'<div class="nota"><b>Por que existe um ajuste ao vivo.</b> O modelo aprendeu com respostas escritas '
-                f'por pessoas, que são mais curtas que as de um assistente comercial. A cada resposta do Gemini, o app '
-                f'mede essa diferença e corrige as próximas previsões. Hoje: {texto_ajuste}. As primeiras respostas, '
-                f'antes do ajuste, tendem a cair fora da faixa: é o modelo aprendendo.</div>')
+            grafico(fig, 300)
+
+        def meta(texto, valor, ok):
+            simbolo, classe = ("✓", "ok") if ok else ("✕", "fora") if ok is not None else ("…", "pend")
+            return f'<div class="meta"><span class="s {classe}">{simbolo}</span><span>{texto}</span><b>{valor}</b></div>'
+        titulo_grafico("Metas definidas antes da primeira rodada")
+        st.html('<div class="metas">'
+                + meta(f"Economia de pelo menos {pct(META_ECONOMIA)} sobre sempre Flash", pct(pil.economia),
+                       pil.economia >= META_ECONOMIA)
+                + meta(f"Qualidade em pelo menos {pct(META_QUALIDADE)} dos pedidos", pct(pil.qualidade),
+                       pil.qualidade >= META_QUALIDADE)
+                + meta("Qualidade melhor que usar sempre o Lite",
+                       f"{pct(pil.qualidade)} × {pct(aval.loc['Sempre Lite'].qualidade)}",
+                       pil.qualidade > aval.loc["Sempre Lite"].qualidade)
+                + meta(f"Juíza concorda com uma pessoa em pelo menos {pct(META_CONCORDANCIA)} dos casos",
+                       f"{pct(concordancia[0])} de {concordancia[1]}" if concordancia else "aguardando avaliação",
+                       concordancia[0] >= META_CONCORDANCIA if concordancia else None)
+                + '</div>')
+
+        perfeita = aval.loc["Escolha perfeita"]
+        st.html(f'<div class="nota"><b>Como ler.</b> Usar sempre o Lite é o mais barato, mas falha em '
+                f'{pct(1 - aval.loc["Sempre Lite"].qualidade)} dos pedidos. Usar sempre o Flash é o mais seguro e o mais caro. '
+                f'O piloto fica no meio: economiza {pct(pil.economia)} e mantém {pct(pil.qualidade)} de qualidade. '
+                f'A escolha perfeita, que só daria para fazer conhecendo as respostas, economizaria '
+                f'{pct(perfeita.economia)}: é o espaço que o roteador ainda pode ganhar aprendendo.</div>')
+
+# ---------- Rodadas ----------
+if secao == "Rodadas":
+    secao_titulo("Rodada a rodada", "Cada rodada usa o roteador treinado com todas as notas anteriores. "
+                 "A primeira usa uma regra simples; a partir de 40 vereditos, ele passa a aprender.")
+    if not tem_dados:
+        sem_dados()
+    else:
+        datas = pd.to_datetime(rodadas.data).dt.strftime("%d/%m")
+        titulo_grafico("Economia e qualidade do piloto", "a linha pontilhada é a meta de qualidade")
+        fig = go.Figure()
+        fig.add_scatter(x=datas, y=100 * rodadas.qualidade, mode="lines+markers", name="qualidade",
+                        line=dict(color=TINTA, width=2))
+        fig.add_scatter(x=datas, y=100 * rodadas.economia, mode="lines+markers", name="economia",
+                        line=dict(color=DESTAQUE, width=2))
+        fig.add_hline(y=100 * META_QUALIDADE, line=dict(color=MUDO, dash="dot", width=1))
+        fig.update_layout(yaxis_title="%", yaxis_range=[0, 105], xaxis_type="category")
+        grafico(fig)
+
+        tabela = pd.DataFrame({
+            "Rodada": datas, "Pedidos": rodadas.pedidos.astype(int),
+            "Roteador": ["regra" if v == 0 else f"v{int(v)}" for v in rodadas.versao],
+            "No Lite": (100 * rodadas.lite).round(0).astype(int).astype(str) + "%",
+            "Economia": (100 * rodadas.economia).round(0).astype(int).astype(str) + "%",
+            "Qualidade": (100 * rodadas.qualidade).round(0).astype(int).astype(str) + "%",
+        })
+        st.dataframe(tabela, hide_index=True, width="stretch")
+
+        if roteador and roteador.versoes:
+            titulo_grafico("Treinos do roteador", "validação cruzada: medida em pedidos que o modelo não viu no treino")
+            v = pd.DataFrame(roteador.versoes)
+            st.dataframe(pd.DataFrame({
+                "Versão": [f"v{i}" for i in range(1, len(v) + 1)],
+                "Treinado em": pd.to_datetime(v.data).dt.strftime("%d/%m"),
+                "Vereditos": v.pedidos,
+                "AUC": v.auc.round(2),
+                "Corte": v.corte.round(2),
+                "No Lite (validação)": (100 * v.lite_validacao).round(0).astype(int).astype(str) + "%",
+                "Qualidade (validação)": (100 * v.qualidade_validacao).round(0).astype(int).astype(str) + "%",
+            }), hide_index=True, width="stretch")
+
+        avaliacao = hist.custo_flash.sum() + hist.custo_lite.sum() + hist.custo_juiza.sum()
+        st.html(f'<div class="nota"><b>Quanto custa provar.</b> Para medir as quatro estratégias, cada pedido gera as duas '
+                f'respostas e passa pela juíza: até agora {usd(avaliacao)}. Em produção, o piloto chamaria só o modelo '
+                f'escolhido e gastaria {usd(pil.custo)}.</div>')
+
+# ---------- Decisões ----------
+if secao == "Decisoes":
+    secao_titulo("Cada decisão", "O que o piloto decidiu, por quê, e o que a juíza achou. Clique em um pedido para ver "
+                 "as duas respostas lado a lado.")
+    if not tem_dados:
+        sem_dados()
+    else:
+        datas = sorted(hist.data.unique(), reverse=True)
+        dia = st.selectbox("Rodada", datas, format_func=lambda d: f"{pd.to_datetime(d):%d/%m/%Y}")
+        d = hist[hist.data == dia].reset_index(drop=True)
+        acertou = (d.rota == "flash") | d.lite_ok.astype(bool)
+        lista = pd.DataFrame({
+            "Pedido": d.pedido.str.slice(0, 90),
+            "Escolha": d.rota.str.capitalize(),
+            "Juíza": d.vencedor.map({"lite": "Lite melhor", "flash": "Flash melhor", "empate": "empate"}),
+            "Resultado": np.where(acertou, "✓", "✕ Lite não deu conta"),
+            "Custo": np.where(d.rota == "lite", d.custo_lite, d.custo_flash).round(5),
+        })
+        ev = st.dataframe(lista, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                          height=320)
+        linha = ev.selection.rows[0] if ev.selection.rows else 0
+        p = d.iloc[linha]
+        st.html(f'<div class="pedido">{p.pedido}</div>'
+                f'<div class="etiquetas"><span>escolha <b class="{p.rota}">{p.rota.capitalize()}</b></span>'
+                f'<span>{p.motivo}</span><span>juíza: <b>{p.motivo_juiza}</b></span></div>')
+        c1, c2 = st.columns(2, gap="large")
+        for col, braco, nome in [(c1, "flash", p.modelo_flash), (c2, "lite", p.modelo_lite)]:
+            with col:
+                titulo_grafico(f"{braco.capitalize()} · nota {int(p['nota_' + braco])}",
+                               f"{nome} · {br(p[braco + '_saida'] + p[braco + '_raciocinio'])} tokens de saída · "
+                               f"{usd(p['custo_' + braco])}")
+                with st.container(height=420, border=True):
+                    st.markdown(p["resposta_" + braco])
 
 # ---------- Como funciona ----------
 if secao == "Como":
-    st.html('<div class="secao"><h2>Como a IA participa do cálculo</h2><p>Duas IAs trabalham juntas: uma prevê, '
-            'a outra responde. Comparando as duas, sabemos se a previsão acerta, e o modelo usa as respostas reais '
-            'para se corrigir sozinho.</p></div>')
-    st.html(f"""<div class="duas">
-      <div><span class="rotulo">IA aplicada · o nosso algoritmo</span><h3>A que prevê</h3>
-        <p>Um modelo de aprendizado de máquina (<b>Gradient Boosting</b>) treinado com {br(len(modelo.pares))} conversas
-        reais do OpenAssistant. Ninguém escreveu a regra à mão: ele aprendeu, a partir dos dados, a relação entre a
-        pergunta e o tamanho da resposta.</p>
-        <ul><li>faz a previsão e a faixa de 80% <b>antes</b> de o Gemini responder</li>
-        <li>se corrige com cada resposta nova (aprendizado online)</li></ul></div>
-      <div><span class="rotulo">IA generativa · Gemini, via API key</span><h3>A que responde</h3>
-        <p>O <b>{MODELO_IA}</b> gera a resposta de verdade e informa quantos tokens gastou. Ele não faz a previsão,
-        mas participa do cálculo em três pontos:</p>
-        <ul><li><b>calibração:</b> conta os tokens de 300 respostas da base com o tokenizador dele</li>
-        <li><b>valor real:</b> informa entrada, resposta e raciocínio de cada chamada</li>
-        <li><b>ajuste ao vivo:</b> o tamanho das respostas dele ensina o modelo a se corrigir</li></ul></div>
-    </div>""")
-
-    ex = modelo.prever("Explique juros compostos com um exemplo", "pt-BR")
+    secao_titulo("Como o piloto funciona", "Três IAs trabalham juntas: o previsor estima o tamanho da resposta, o "
+                 "roteador decide o modelo e a juíza confere a qualidade. As notas da juíza ensinam o roteador.")
+    rot = roteador or roteador_inicial(modelo)
     st.html(f"""<div class="passos">
-      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Treino, uma vez ao ligar o app</h4>
-        <p>Cada conversa da base vira uma linha: as características da pergunta e o tamanho da resposta. Três modelos são
-        treinados com 75% das conversas: um para o valor central, um para o percentil 10 e um para o percentil 90.
-        Os 25% restantes ficam guardados para o teste.</p></div>
-        <div class="formula"><i>características da pergunta</i>
-log(1 + tokens) · tem código? · nº de "?"
-é continuação? · idioma
-<i>alvo</i>
-log(1 + tokens da resposta)</div></div>
+      <div class="passo"><div><span class="quemfaz">automação</span><h4>Todo dia, sozinho</h4>
+        <p>O GitHub Actions dispara a rodada às 8h. O piloto sorteia pedidos reais do OpenAssistant que ainda não
+        atendeu, todos do conjunto de teste: o previsor nunca viu nenhum deles.</p></div>
+        <div class="formula">fila: {br(len(pd.read_csv(DADOS / "fila_pedidos.csv")))} pedidos reais
+<i>por rodada:</i> 50 pedidos</div></div>
 
-      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>Calibração da régua de tokens</h4>
-        <p>Cada modelo de IA corta o texto em tokens de um jeito. O app envia 300 respostas da base ao contador do
-        Gemini e compara com o tokenizador usado no treino. O resultado converte a previsão para a unidade que o Gemini cobra.</p></div>
-        <div class="formula">fator = tokens do Gemini ÷ tokens o200k
-<i>agora:</i> fator = {br(fator, 2)}</div></div>
+      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Previsão do tamanho da resposta</h4>
+        <p>O Gradient Boosting treinado com 18.924 conversas estima quantos tokens a resposta vai ter (mediana e
+        faixa de 80%). Respostas longas tendem a ser pedidos mais difíceis.</p></div>
+        <div class="formula">entrada: tokens do pedido · tem código?
+         nº de "?" · idioma
+<i>saída:</i>  p10 · mediana · p90 de tokens</div></div>
 
-      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Previsão, antes de cada resposta</h4>
-        <p>Quando você envia a pergunta, o modelo prevê o tamanho da resposta e a faixa de 80%. A previsão é convertida
-        pela calibração e corrigida pelo ajuste ao vivo.</p></div>
-        <div class="formula">previsão = modelo(pergunta) × fator × ajuste
-<i>ex.: "Explique juros compostos com um exemplo"</i>
-modelo:   ~{br(ex.mediana)} ({br(ex.p10)}–{br(ex.p90)})
-× fator:  ~{br(ex.mediana * fator)} ({br(ex.p10 * fator)}–{br(ex.p90 * fator)})
-× ajuste: ~{br(ex.mediana * fator * ajuste)} ({br(ex.p10 * fator * ajuste)}–{br(ex.p90 * fator * ajuste)})</div></div>
+      <div class="passo"><div><span class="quemfaz ml">aprendizado de máquina</span><h4>Decisão: Lite ou Flash</h4>
+        <p>Na primeira rodada, uma regra: pedido sem código e com resposta prevista curta vai para o Lite. Depois, uma
+        regressão logística aprende com as notas da juíza a chance de o Lite dar conta de cada pedido.</p></div>
+        <div class="formula">Lite se P(Lite dá conta) ≥ corte
+<i>corte:</i> o menor que mantém a qualidade ≥ {pct(META_QUALIDADE)}
+<i>agora:</i> {"regra, p90 < " + br(rot.limiar_p90) + " tokens" if rot.tipo == "regra" else f"v{rot.versao}, corte {br(rot.corte, 2)}"}</div></div>
 
-      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>Resposta e consumo real</h4>
-        <p>O Gemini gera a resposta e a própria API informa os tokens. A resposta está <b>na faixa</b> quando o tamanho
-        real fica entre os percentis 10 e 90. O raciocínio entra no custo, mas não na comparação: a base só tem texto.</p></div>
-        <div class="formula">entrada    = prompt_token_count
-resposta   = candidates_token_count
-raciocínio = thoughts_token_count
-<i>acerto:</i> p10 ≤ resposta ≤ p90</div></div>
+      <div class="passo"><div><span class="quemfaz gem">Gemini</span><h4>As duas respostas</h4>
+        <p>Para provar o resultado, o Flash e o Lite respondem a todos os pedidos. Em produção, só o escolhido
+        responderia. A própria API informa os tokens de cada chamada.</p></div>
+        <div class="formula">custo = ( entrada × preço de entrada
+        + (resposta + raciocínio) × preço de saída ) ÷ 1.000.000</div></div>
 
-      <div class="passo"><div><span class="quemfaz ml">aprendizado online</span><h4>Ajuste ao vivo</h4>
-        <p>O modelo aprendeu com respostas escritas por pessoas, mais curtas que as de um assistente comercial.
-        A partir da 3ª resposta real, o app mede quantas vezes o Gemini fala mais que a base e corrige as próximas previsões.</p></div>
-        <div class="formula">ajuste = exp( mediana( log real − log previsto ) )
-<i>agora:</i> {texto_ajuste}</div></div>
+      <div class="passo"><div><span class="quemfaz gem">Gemini · juíza</span><h4>A juíza compara</h4>
+        <p>Outra chamada ao Gemini recebe o pedido e as duas respostas como A e B, em ordem sorteada, sem saber qual
+        modelo gerou cada uma, e devolve notas de 1 a 5 e o veredito em JSON.</p></div>
+        <div class="formula">Lite deu conta = juíza disse "empate"
+                  ou preferiu o Lite</div></div>
 
-      <div class="passo"><div><span class="quemfaz">conta simples</span><h4>Custo</h4>
-        <p>Multiplicação pelo preço de tabela, por milhão de tokens. O raciocínio do modelo é cobrado como saída.</p></div>
-        <div class="formula">custo = ( entrada × US$ {br(PRECO_IN, 2)}
-        + (resposta + raciocínio) × US$ {br(PRECO_OUT, 2)} ) ÷ 1.000.000</div></div>
+      <div class="passo"><div><span class="quemfaz ml">aprendizado contínuo</span><h4>O roteador se retreina</h4>
+        <p>Os vereditos de todas as rodadas viram dados de treino. O corte é escolhido com validação cruzada, em
+        pedidos que o modelo não viu. O resultado vai para o repositório e o app se atualiza sozinho.</p></div>
+        <div class="formula">roteador.json + execucoes/AAAA-MM-DD.csv
+<i>→</i> commit automático → app atualizado</div></div>
     </div>""")
 
-    st.html('<div class="nota"><b>O que não é IA.</b> Contar os tokens da pergunta (regra fixa de corte de texto), '
-            'calcular o custo (multiplicação) e a simulação de Monte Carlo (sorteio e soma). A IA está em aprender com os '
-            'dados, prever e se corrigir, e em gerar a resposta.</div>')
+    titulo_grafico("Teste um pedido", "o roteador atual decide na hora, sem chamar o Gemini")
+    texto = st.text_input("Pedido", "Explique juros compostos com um exemplo", label_visibility="collapsed")
+    if texto.strip():
+        x, prev = piloto.caracteristicas(texto, "pt-BR", modelo)
+        rota, motivo = rot.decidir(x)
+        st.html(f'<div class="etiquetas"><span>previsão <b>~{br(prev.mediana)}</b> tokens '
+                f'({br(prev.p10)}–{br(prev.p90)})</span><span>escolha <b class="{rota}">{rota.capitalize()}</b></span>'
+                f'<span>{motivo}</span></div>')
 
-# ---------- O algoritmo ----------
-if secao == "Algoritmo":
+# ---------- O previsor ----------
+if secao == "Previsor":
     p = modelo.pares
     m = modelo.metricas.set_index("modelo")
     gb = m.loc["Gradient Boosting"]
     real, previsto = modelo.custo_mensal(10_000, PRECO_IN, PRECO_OUT)
     erro_mes = 100 * np.median(np.abs(previsto - real) / real)
-    st.html('<div class="secao"><h2>Como a previsão é feita</h2><p>Base pública OpenAssistant (oasst1), com 18.924 '
-            'pares de pergunta e resposta reais. Aprendizado supervisionado (regressão), validado em 25% dos dados '
-            'que o modelo não viu durante o treino.</p></div>')
+    secao_titulo("O previsor de tokens", "A primeira peça do piloto. Base pública OpenAssistant (oasst1), com 18.924 "
+                 "pares de pergunta e resposta reais. Aprendizado supervisionado (regressão), validado em 25% dos "
+                 "dados que o modelo não viu durante o treino.")
     faixa([
         ("Conversas na base", br(len(p)), "pares pergunta → resposta", False),
         ("Erro médio", f"{br(gb.mae)} tokens", f"chute ingênuo: {br(m.loc['Baseline (mediana)'].mae)}", False),
@@ -578,10 +478,10 @@ if secao == "Algoritmo":
         fig.update_layout(barmode="overlay", xaxis_title="US$", yaxis_title="simulações")
         grafico(fig)
     st.html(f"""
-    <div class="nota"><b>O que os dados mostram.</b> Prever o tamanho de <i>uma</i> resposta é difícil: o modelo explica
-    ~{br(100 * gb.r2)}% da variação e bate o chute ingênuo por pouco. Mas uma aplicação paga milhares de respostas, e na
-    soma os erros se compensam: o custo de 10.000 respostas fica a ~{br(erro_mes)}% do real. A faixa de 80% acerta
-    {br(100 * modelo.cobertura_faixa)}% das vezes no teste, e o painel de consumo mede a mesma coisa contra o Gemini, ao vivo.</div>""")
+    <div class="nota"><b>Por que o previsor sozinho não bastava.</b> Prever o tamanho de <i>uma</i> resposta é difícil:
+    o modelo explica ~{br(100 * gb.r2)}% da variação e bate o chute ingênuo por pouco. No total de milhares de respostas
+    os erros se compensam (~{br(erro_mes)}% no custo do mês), mas para isso uma média histórica já serve. O ganho real
+    veio de usar a previsão como uma das pistas para <b>decidir</b> o modelo de cada pedido.</div>""")
 
 # ---------- Sobre ----------
 if secao == "Sobre":
@@ -589,31 +489,35 @@ if secao == "Sobre":
     with c1:
         st.markdown("""
 #### O problema
-Toda aplicação com IA generativa paga por **token**. Ela conhece a pergunta que envia,
-mas **não sabe o tamanho da resposta**, que é a parte mais cara. Sem isso, não dá para planejar o orçamento.
+Toda aplicação com IA generativa paga por **token**, e o modelo mais capaz custa várias vezes mais que o mais
+simples. Mandar tudo para o modelo caro desperdiça dinheiro; mandar tudo para o barato derruba a qualidade.
 
 #### A solução
-O TokenScope usa a IA de verdade (Gemini) e, a cada resposta, **prevê** os tokens antes e **mede** o consumo real
-depois. O painel acumula o uso e mostra se a previsão acerta.
+Um **piloto automático** que decide, pedido a pedido, qual modelo usar, mede o resultado com uma IA juíza e
+**aprende sozinho** com isso. Roda todo dia, sem ninguém clicar.
 
 #### A família de algoritmos
-- **Aprendizado supervisionado, regressão**: Gradient Boosting (previsão central) e regressão quantílica
-  (faixa de 80%), comparados com regressão linear e com um chute ingênuo.
-- **Simulação de Monte Carlo** para o custo de milhares de respostas.
+- **Regressão** (Gradient Boosting e regressão quantílica): prevê o tamanho da resposta.
+- **Classificação** (regressão logística): prevê se o modelo barato dá conta do pedido.
+- **LLM como juiz**: o Gemini avalia as respostas, validado contra avaliação humana.
+- **Aprendizado contínuo**: o roteador é retreinado a cada rodada.
+- **Monte Carlo**: projeção do custo de milhares de respostas.
 """)
     with c2:
-        st.markdown(f"""
+        st.markdown("""
 #### Os dados
 [OpenAssistant oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1): ~88 mil mensagens reais,
-18.924 pares pergunta → melhor resposta, em vários idiomas. Licença Apache 2.0.
+18.924 pares pergunta → melhor resposta. Licença Apache 2.0. Os pedidos do piloto saem do conjunto de teste.
 
-#### Tokens de IA
-Cada mensagem gasta tokens reais do **{MODELO_IA}**, informados pela própria API. Para comparar previsão e
-consumo na mesma unidade, o app mede uma amostra da base com o contador de tokens do Gemini e calibra o modelo.
+#### É válido?
+- As duas respostas são geradas para todos os pedidos: a comparação entre estratégias é nos mesmos pedidos.
+- A juíza não sabe qual modelo gerou cada resposta, e a ordem é sorteada.
+- O corte do roteador é escolhido com validação cruzada.
+- Uma amostra é avaliada por uma pessoa para medir se a juíza é confiável.
 
 #### Limitações
-- As respostas da base são de voluntários, não de um modelo comercial.
-- Modelos com raciocínio gastam tokens extras que não aparecem no texto. Eles entram no custo, mas não na previsão.
-- O painel guarda o uso enquanto o servidor estiver no ar.
+- A juíza é do mesmo fornecedor dos modelos avaliados.
+- Os preços por token são de tabela e mudam com o tempo.
+- Os pedidos do OpenAssistant são genéricos; uma aplicação real teria outro perfil.
 """)
     st.caption("Atividade de IA aplicada e IA experimental, Prof. Wagner, 3º ciclo.")

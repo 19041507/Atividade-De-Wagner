@@ -4,10 +4,6 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-import pandas as pd
-
-from core.modelo import DADOS
-
 TIMEOUT_MS = 40_000                  # sem receber nada nesse tempo, a tentativa é abandonada
 PRAZO_PARA_NOVA_TENTATIVA = 45       # segundos: depois disso, não vale fazer a pessoa esperar mais
 TRANSITORIOS = {429, 500, 503, 504}  # sobrecarga ou limite: vale tentar de novo
@@ -175,14 +171,3 @@ def julgar(pedido: str, resposta_a: str, resposta_b: str, chave: str, modelo: st
     v = json.loads(r.texto)
     return Veredito(int(v["nota_a"]), int(v["nota_b"]), v["melhor"], v["motivo"], r)
 
-def fator_calibracao(chave: str, modelo: str) -> float:
-    """Tokens do Gemini por token do o200k_base, medido numa amostra de 300 respostas reais da base.
-
-    O modelo de previsão foi treinado em tokens o200k_base; este fator converte a previsão
-    para a unidade que o Gemini cobra.
-    """
-    amostra = pd.read_csv(DADOS / "amostra_calibracao.csv")
-    texto = "\n\n".join(amostra.text)
-    cliente = _cliente(chave)
-    r = cliente.models.count_tokens(model=modelo, contents=texto)
-    return r.total_tokens / amostra.tokens.sum()

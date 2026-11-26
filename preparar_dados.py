@@ -1,7 +1,6 @@
 """Gera os arquivos auxiliares do app a partir da base oasst1.
 
 - data/tokens_por_idioma.csv: tokens a cada 1.000 caracteres por idioma
-- data/amostra_calibracao.csv: 300 respostas reais, usadas para calibrar o tokenizador do Gemini
 - data/fila_pedidos.csv: perguntas reais que o piloto automático atende, uma rodada por dia
 
 Os pares prompt → resposta (data/pares_prompt_resposta.csv) são gerados pelo notebook.
@@ -33,7 +32,6 @@ idiomas["tokens_por_1000_caracteres"] = (1000 * idiomas.tokens / idiomas.chars).
 idiomas.to_csv("data/tokens_por_idioma.csv")
 
 respostas = msgs[(msgs.role == "assistant") & (msgs["rank"] == 0)]
-respostas.sample(300, random_state=7)[["lang", "text", "tokens"]].to_csv("data/amostra_calibracao.csv", index=False)
 
 # Fila do piloto: perguntas do conjunto de TESTE do modelo de tokens (mesma ordem dos pares e mesmo
 # train_test_split de core/modelo.py), para o roteador nunca decidir sobre algo que o previsor viu no treino.
