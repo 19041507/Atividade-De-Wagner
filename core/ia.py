@@ -100,7 +100,21 @@ def escolher_juiza(chave: str) -> str | None:
     def ordem(n):
         versao = re.search(r"(\d+(?:\.\d+)?)", n)
         return ("preview" in n, -float(versao.group(1)) if versao else 0, len(n))
-    return sorted(candidatos, key=ordem)[0]
+    # A lista traz modelos que a conta não pode usar ("no longer available to new users"): testa com uma
+    # chamada mínima e fica com o primeiro liberado. Sem cota agora (429) conta como liberado: a juíza não
+    # deve mudar de um dia para o outro só porque a cota acabou.
+    from google.genai import types
+    for nome in sorted(candidatos, key=ordem):
+        try:
+            cliente.models.generate_content(model=nome, contents="ok",
+                                            config=types.GenerateContentConfig(max_output_tokens=1))
+            return nome
+        except Exception as e:
+            texto = str(e)
+            if "404" in texto or "403" in texto or "no longer available" in texto:
+                continue
+            return nome
+    return None
 
 
 def conversar(mensagens: list[dict], chave: str, modelo: str, instrucao: str,
